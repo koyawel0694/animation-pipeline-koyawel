@@ -1,0 +1,14 @@
+{
+  "default_preset": "photorealistic_live_action",
+  "alternatives": [
+    "webtoon_2d",
+    "anime_sakuga_2d",
+    "motion_comic_2d"
+  ],
+  "character_reference_chapter": "0",
+  "character_reference_status": "provisional_until_final_style_lock",
+  "regenerate_canonical_refs_once": true,
+  "reuse_canonical_refs_until_last_chapter": true,
+  "do_not_regenerate_per_chapter": true,
+  "selected_by_user": true
+}

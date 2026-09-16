@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "description": "Style and motion presets for manga/manhwa/webtoon-to-video prompt export.",
+  "default_for_unconfigured_chapters": "webtoon_2d",
+  "presets": {
+    "photorealistic_live_action": {
+      "label": "Photorealistic live-action adaptation",
+      "media_mode": "live_action",
+      "style_anchor": "Visual style: photorealistic live-action cinematic adaptation of the source manhwa. Real human actors, grounded physical environments, practical costumes and props, cinematic production design, natural skin texture, physically plausible lighting, live-action lens rendering, subtle film grain, and high-end theatrical fantasy cinematography. Fantasy creatures and magic are practical/CGI effects integrated into the live-action plate with correct scale, contact shadows, reflections, smoke, sparks, and atmospheric depth. The source comic is a design and story reference only; do not show drawn comic art.",
+      "motion_anchor": "Motion style: physically grounded live-action performance with believable weight, inertia, cloth, hair, debris, smoke, and creature motion. Use restrained dolly, crane, handheld, Steadicam, or lens push movements chosen for the beat; action should feel photographed by a real camera, not like a 2D animation.",
+      "negative_anchor": "STRICTLY NOT 2D illustration, NOT anime, NOT cel shading, NOT manhwa line art, NOT comic panels, NOT motion-comic parallax, NOT plastic CGI humans, NOT game-rendered characters, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Use live-action character reference images or grounded casting descriptions as identity anchors. If a 2D character sheet is supplied, use it only to preserve facial structure, hair, wardrobe, props, and silhouette; translate all of those design cues into plausible live action.",
+      "audio_anchor": "Sound design: production-location ambience, footsteps, cloth and prop foley, physically grounded impacts, atmospheric room tone, and cinematic score; spoken dialogue is natural English performance."
+    },
+    "webtoon_2d": {
+      "label": "2D Korean webtoon/manhwa cel animation",
+      "media_mode": "2d_animation",
+      "style_anchor": "Art style: authentic 2D Korean webtoon manhwa anime animation. Crisp clean dark ink line art, vibrant flat cel-shaded coloring, authentic manhwa character features, controlled 2D animation, and cinematic vertical composition.",
+      "motion_anchor": "Motion style: deliberate 2D limited animation with expressive key poses, selective in-betweens, animated hair and cloth, controlled effects, camera pushes, pans, cranes, and readable impact frames.",
+      "negative_anchor": "STRICTLY NOT 3D render, NOT live-action CGI, NOT photorealistic, NOT western comic-book style, NOT comic panels, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Use the supplied 2D character reference sheets as exact identity anchors for face, hair, body proportions, wardrobe, props, and color palette.",
+      "audio_anchor": "Sound design: stylized 2D impact accents, environmental ambience, cinematic music, and spoken English dialogue with the emotion cue at the start."
+    },
+    "anime_sakuga_2d": {
+      "label": "Hand-drawn anime sakuga action",
+      "media_mode": "2d_animation",
+      "style_anchor": "Art style: premium hand-drawn 2D anime action animation with clean expressive ink, strong key poses, dynamic perspective, confident anatomy, high-contrast cel shading, selective smear frames, speed lines, impact bursts, and cinematic color design.",
+      "motion_anchor": "Motion style: high-energy hand-drawn keyframe animation for the main action, with fluid anticipation, follow-through, squash and stretch where appropriate, fast readable camera language, animated effects, and brief held poses for dramatic emphasis.",
+      "negative_anchor": "STRICTLY NOT 3D CGI, NOT photorealistic, NOT live-action, NOT generic western cartoon, NOT static slideshow, NOT comic panels, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Use the supplied character references to lock facial identity, hairstyle, costume anchors, weapon design, creature anatomy, and palette across every shot.",
+      "audio_anchor": "Sound design: sharp anime-style action impacts, weapon accents, magical effects, environmental ambience, score hits, and spoken English dialogue with emotion cues."
+    },
+    "motion_comic_2d": {
+      "label": "Source-faithful motion comic",
+      "media_mode": "motion_comic",
+      "style_anchor": "Art style: polished full-color Korean webtoon motion-comic adaptation, preserving the source line art, cel-shaded palette, facial identity, wardrobe, and graphic silhouettes while presenting each beat as a clean cinematic vertical composition.",
+      "motion_anchor": "Motion style: restrained source-faithful animation using multiplane parallax, subtle character breathing and eye movement, animated hair and cloth, environmental particles, controlled pans and zooms, and selective effects. Keep the original visual language recognizable without turning the output into a static slideshow.",
+      "negative_anchor": "NOT photorealistic, NOT live-action, NOT 3D CGI, NOT a pasted page, NOT visible comic gutters, NOT scanlation text, NOT a multi-panel collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Use the clean narrative crop and character reference as identity anchors, but stage one full-bleed shot per beat and remove source-page gutters, captions, credits, and promotional material.",
+      "audio_anchor": "Sound design: restrained cinematic ambience, selective whooshes and impacts, subtle score, and spoken English dialogue with emotion cues."
+    }
+  }
+}
