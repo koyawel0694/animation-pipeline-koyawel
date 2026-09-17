@@ -177,6 +177,71 @@ def load_storyboard(chapter_dir: Path) -> tuple[dict, list[dict]]:
     return data, blocks
 
 
+def extract_characters_for_beats(beats: list[dict], chapter_dir: Path | None = None) -> list[str]:
+    """Extract and normalize prominent character names for prompt headers."""
+    known = []
+    if chapter_dir:
+        char_paths = [
+            chapter_dir / "characters.json",
+            chapter_dir.parent / "characters.json",
+            chapter_dir.parent.parent / "characters.json",
+        ]
+        for p in char_paths:
+            if p.exists():
+                try:
+                    cdata = json.loads(p.read_text(encoding="utf-8"))
+                    for item in cdata:
+                        raw_name = item.get("name", "")
+                        slug = item.get("slug", "")
+                        clean_name = re.sub(r"\(.*?\)", "", raw_name).strip()
+                        clean_name = " ".join(w.capitalize() for w in clean_name.split())
+                        if clean_name:
+                            known.append((clean_name, slug.lower() if slug else "", raw_name.lower()))
+                    if known:
+                        break
+                except Exception:
+                    pass
+
+    text_corpus = " ".join(
+        f"{b.get('speaker', '')} {b.get('action', '')} {b.get('scene_title', '')} {b.get('vo', '')}"
+        for b in beats
+    ).lower()
+
+    found = []
+    for display_name, slug, full_name in known:
+        slug_words = [w for w in slug.split("_") if len(w) > 2]
+        if (
+            display_name.lower() in text_corpus
+            or (slug and slug in text_corpus)
+            or any(w in text_corpus for w in slug_words)
+            or (display_name == "Li Yi" and any(w in text_corpus for w in ["li yi", "protagonist"]))
+            or ("shadow beast" in display_name.lower() and any(w in text_corpus for w in ["shadow beast", "alien predator", "alien creature", "alien beast", "alien"]))
+        ):
+            found.append(display_name)
+
+    for b in beats:
+        spk = b.get("speaker", "").strip()
+        clean_spk = re.sub(r"\(.*?\)", "", spk).strip()
+        if clean_spk and clean_spk.lower() not in {"narrator", "sfx", "sound effect", "system", "caption", "none", "unknown", "protagonist"}:
+            title_spk = " ".join(w.capitalize() for w in clean_spk.split())
+            if "miner" in title_spk.lower() or "worker" in title_spk.lower():
+                title_spk = "Miners"
+            elif "supervisor" in title_spk.lower():
+                title_spk = "Supervisor Chen"
+            elif "alien" in title_spk.lower() or "beast" in title_spk.lower():
+                title_spk = "Otherworld Shadow Beast"
+            if not any(title_spk.lower() == f.lower() for f in found):
+                found.append(title_spk)
+
+    seen = set()
+    result = []
+    for c in found:
+        if c.lower() not in seen:
+            seen.add(c.lower())
+            result.append(c)
+    return result or ["Li Yi"]
+
+
 def format_shot_prompt(
     title: str,
     block: dict,
@@ -185,6 +250,7 @@ def format_shot_prompt(
     beat_number: int,
     profile: dict,
     episode_context: str | None = None,
+    chapter_dir: Path | None = None,
 ) -> str:
     final = beat_number == len(block.get("beats") or []) - 1
     header = (
@@ -192,16 +258,21 @@ def format_shot_prompt(
         if episode_context
         else f"Storyboard block {block_number}, beat {beat_number + 1}, timing {text(beat.get('timestamp'))}."
     )
-    lines = [
+    characters = extract_characters_for_beats([beat], chapter_dir) or extract_characters_for_beats(block.get("beats") or [], chapter_dir)
+    char_header = f"(Characters: {', '.join(characters)})" if characters else ""
+    lines = []
+    if char_header:
+        lines.append(char_header)
+    lines.extend([
         *style_lines(profile),
         f"Series: {text(title)}.",
         header,
         f"Create one continuous full-bleed shot for the beat labelled {text(beat.get('label'))}.",
-        f"Canonical source scene: {text(beat.get('source_scene_id'))} — {text(beat.get('scene_title'))}.",
+        f"Canonical source scene: {text(beat.get('source_scene_id'))} — {sanitize_flow_action(text(beat.get('scene_title')))}.",
         f"Action and composition: {sanitize_flow_action(text(beat.get('action')))}",
         f"Camera movement: {sanitize_flow_action(text(beat.get('camera')))}",
         script_cue(beat),
-    ]
+    ])
     if beat.get("sfx"):
         lines.append(f"Sound design suggestion: {text(beat.get('sfx'))}")
     if beat.get("page_file"):
@@ -223,22 +294,28 @@ def format_continuous_prompt(
     block_number: int,
     profile: dict,
     episode_context: str | None = None,
+    chapter_dir: Path | None = None,
 ) -> str:
+    characters = extract_characters_for_beats(block.get("beats") or [], chapter_dir)
+    char_header = f"(Characters: {', '.join(characters)})" if characters else ""
     beats = block.get("beats") or []
     beat_lines = []
     for index, beat in enumerate(beats, 1):
         beat_lines.append(
             f"Beat {index} ({text(beat.get('timestamp'))}) — {text(beat.get('label'))}: "
-            f"Canonical source scene {text(beat.get('source_scene_id'))} ({text(beat.get('scene_title'))}). "
+            f"Canonical source scene {text(beat.get('source_scene_id'))} ({sanitize_flow_action(text(beat.get('scene_title')))}). "
             f"{sanitize_flow_action(text(beat.get('action')))} Camera: {sanitize_flow_action(text(beat.get('camera')))}. "
             f"{script_cue(beat)}"
         )
     block_target = (
         episode_context
         if episode_context
-        else f"storyboard block {block_number}: {text(block.get('block_title'))}"
+        else f"storyboard block {block_number}: {sanitize_flow_action(text(block.get('block_title')))}"
     )
-    return "\n".join([
+    lines = []
+    if char_header:
+        lines.append(char_header)
+    lines.extend([
         *style_lines(profile),
         f"Series: {text(title)}.",
         f"Create one coherent 10-second vertical drama block, {block_target}.",
@@ -247,6 +324,7 @@ def format_continuous_prompt(
         *beat_lines,
         "Use the final beat as a complete freeze frame; do not add a new action after the final pose.",
     ])
+    return "\n".join(lines)
 
 
 def write_delimited(path: Path, prompts: list[str]) -> None:
@@ -332,10 +410,10 @@ def main() -> None:
 
         # Shot prompts for root flow_queue
         shots = [
-            format_shot_prompt(title, block, beat, block_number, beat_number, profile)
+            format_shot_prompt(title, block, beat, block_number, beat_number, profile, chapter_dir=chapter_dir)
             for beat_number, beat in enumerate(block.get("beats") or [])
         ]
-        continuous_prompt = format_continuous_prompt(title, block, block_number, profile)
+        continuous_prompt = format_continuous_prompt(title, block, block_number, profile, chapter_dir=chapter_dir)
 
         # Shot prompts tailored for the specific episode (1-indexed per episode)
         ep_shots = [
@@ -347,6 +425,7 @@ def main() -> None:
                 beat_number,
                 profile,
                 episode_context=f"Episode {ep_num}, storyboard block {ep_block_num}" if has_episodes else None,
+                chapter_dir=chapter_dir,
             )
             for beat_number, beat in enumerate(block.get("beats") or [])
         ]
@@ -356,6 +435,7 @@ def main() -> None:
             block_number,
             profile,
             episode_context=f"Episode {ep_num}, block {ep_block_num}: {text(block.get('block_title'))}" if has_episodes else None,
+            chapter_dir=chapter_dir,
         )
 
         # Write root block prompt files
