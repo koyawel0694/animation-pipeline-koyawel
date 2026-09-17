@@ -16,11 +16,11 @@ metadata:
 
 Turns one scraped manga/manhwa/manhua chapter into production-ready short-form video assets:
 1. **Scraped chapter panels**: Clean, numbered narrative pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
-2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) on neutral studio backdrops (front full-body, 3/4 portrait, side profile, action pose) as shown in `image-2.png`.
-3. **9:16 vertical storyboards**: 10-second SERYE drama director sheets (`768x1376`, 5 rows: 2+1+2+2+1, 6 beats with timestamps, ending on freeze frame) in `nano_storyboards/` as shown in `image-3.png` and `image-4.png`.
-4. **Block prompts only in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/` as shown in `image-5.png`.
+2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) on neutral studio backdrops (front full-body, 3/4 portrait, side profile, action pose) in `character_refs/`.
+3. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze frame ending in `storyboard_9_16.json` (no visual PNG storyboard sheets).
+4. **Block prompts in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/`.
 
-No final video rendering, no narration audio generation, no review prose, and no CSV files required (disregard legacy CSV and manual video rendering flows).
+Visual storyboard PNG sheet generation (legacy nano_storyboards/) is REMOVED from the pipeline. Video generation tools take prompt text, not composite storyboard sheets. No final video rendering, no narration audio generation, no review prose, and no CSV files required.
 
 ## When to Use
 
@@ -125,16 +125,13 @@ Output: `chapter_analysis.json` containing exact dialogue, parenthesized vocal e
   ```
   Writes `character_refs_source.json` pointing to Chapter 1 without duplicate files.
 
-### Stage 4: 9:16 Vertical Storyboards (image-3.png & image-4.png)
-Generate 10-second SERYE drama storyboard sheets (`768x1376`, 5 rows: 2+1+2+2+1 = 8 distinct shots, 6 timing beats ending on freeze frame):
+### Stage 4: Storyboard Narrative Blocks (storyboard_9_16.json)
+Build 10-second SERYE drama storyboard blocks (6 timing beats per block, timestamps, dialogue, ending on freeze frame):
 ```bash
-# Build storyboard metadata:
 python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N>
-
-# Compose visual storyboard sheets:
-python3 compose_chapter_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
 ```
-Output: `nano_storyboards/block01_*.png` through `block06_*.png` matching the exact layout in `image-4.png`.
+Output: `storyboard_9_16.json` and `storyboard_9_16.md`.
+NOTE: Visual storyboard sheet compositing (`compose_chapter_storyboards.py` -> `nano_storyboards/*.png`) is omitted. The JSON metadata feeds directly into the video prompt generator.
 
 ### Stage 5: Block Prompts Only in .txt Format (image-5.png)
 Export plain-text prompts for video generators (Google Flow, Kling, Runway):

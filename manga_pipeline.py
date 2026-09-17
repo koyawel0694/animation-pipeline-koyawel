@@ -177,15 +177,20 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
     )
 
 
-def run_storyboard_assets(chapter_dir: Path, python_bin: str, style_preset: str | None = None):
-    """Ensure identity refs exist, then build chapter storyboard PNGs."""
+def run_character_assets(chapter_dir: Path, python_bin: str, style_preset: str | None = None):
+    """Ensure identity character references exist."""
     refs = resolve_character_reference_dir(chapter_dir)
     if not refs.is_dir() or not list(refs.glob("*.png")):
         run_command(
             character_generation_command(chapter_dir, python_bin, style_preset=style_preset),
             label="Initial Character Reference Generator",
         )
-        refs = chapter_dir / "character_refs"
+
+
+def run_storyboard_assets(chapter_dir: Path, python_bin: str, style_preset: str | None = None):
+    """Ensure identity refs exist, then build chapter storyboard PNGs."""
+    run_character_assets(chapter_dir, python_bin, style_preset=style_preset)
+    refs = resolve_character_reference_dir(chapter_dir)
     run_command(
         storyboard_asset_command(chapter_dir, python_bin, refs),
         label="Character-Referenced Storyboard Sheet Composer",
@@ -304,17 +309,21 @@ def orchestrate_manga_pipeline(
             else:
                 print(f"[WARN] Missing {canon_json}; skipping storyboard block definition.")
 
-        # Stage: Character identity refs + visual storyboard sheets
-        # Reuse established Chapter 1 refs; compose chapter-local sheets.
-        if stage in ("all", "storyboard", "visuals"):
-            print_banner("STAGE 3C: CHARACTER REFS + STORYBOARD PNGs")
+        # Stage: Character identity refs (standard in all pipeline runs)
+        if stage in ("all", "characters", "refs"):
+            print_banner("STAGE 3C: CHARACTER REFS")
+            run_character_assets(ch_dir, python_bin, style_preset=active_style)
+
+        # Stage: Optional visual storyboard PNG sheets (opt-in only via --stage storyboard-sheets)
+        if stage in ("storyboard-sheets", "visuals"):
+            print_banner("STAGE 3C-OPT: STORYBOARD PNG SHEETS")
             storyboard_json = ch_dir / "storyboard_9_16.json"
-            prompts_csv = ch_dir / "video_prompts.csv"
-            if storyboard_json.exists() and prompts_csv.exists():
-                run_storyboard_assets(ch_dir, python_bin, style_preset=active_style)
-            else:
-                missing = [str(path) for path in (prompts_csv, storyboard_json) if not path.exists()]
-                print(f"[WARN] Missing required upstream artifact(s): {', '.join(missing)}. Skipping visual asset generation.")
+            if storyboard_json.exists():
+                refs = resolve_character_reference_dir(ch_dir)
+                run_command(
+                    storyboard_asset_command(ch_dir, python_bin, refs),
+                    label="Character-Referenced Storyboard Sheet Composer",
+                )
 
         # Stage: plain-text block prompts
         if stage in ("all", "flow"):
@@ -334,9 +343,7 @@ def orchestrate_manga_pipeline(
         print(f"3. SERYE 10s Storyboard Markdown: {ch_dir / 'storyboard_9_16.md'}")
         print(f"4. SERYE 10s Storyboard HTML:     {ch_dir / 'storyboard_9_16.html'}")
         print(f"5. Character Reference Sheets:   {ch_dir / 'character_refs'}")
-        print(f"6. 10s Visual Storyboard Sheets: {ch_dir / 'nano_storyboards'}")
-        print(f"7. Visual Master Gallery:        {ch_dir / 'gallery.html'}")
-        print(f"8. Block Prompt TXT Files:          {ch_dir / 'flow_queue'}")
+        print(f"6. Block Prompt TXT Files:       {ch_dir / 'flow_queue'}")
         print("-" * 68)
 
     print_banner("PIPELINE COMPLETE — CHAPTER ASSET PACK READY")

@@ -105,31 +105,33 @@ def check_storyboards(chapter_dir: Path, errors: list[str]) -> tuple[int, int]:
         final_text = " ".join(str(value or "") for value in beats[-1].values()).lower()
         if "freeze" not in final_text:
             fail(errors, f"storyboard block {index} has no final freeze-frame instruction")
-    manifest = load_json(chapter_dir / "storyboard_assets_manifest.json", errors)
-    manifest_blocks = (manifest or {}).get("blocks") or []
-    if len(manifest_blocks) != len(blocks):
-        fail(errors, f"storyboard manifest count {len(manifest_blocks)} does not match block count {len(blocks)}")
-    sheets = []
-    for item in manifest_blocks:
-        output = item.get("output")
-        if not output:
-            fail(errors, "storyboard manifest has a block without an output path")
-            continue
-        path = Path(output)
-        if not path.is_absolute():
-            path = chapter_dir / path
-        if not path.exists():
-            fail(errors, f"storyboard manifest points to missing PNG: {path}")
-        else:
-            sheets.append(path)
-    for path in sheets:
-        try:
-            with Image.open(path) as image:
-                if image.size[0] * 1376 != image.size[1] * 768:
-                    fail(errors, f"storyboard is not 9:16: {path.name} {image.size}")
-                image.verify()
-        except Exception as exc:
-            fail(errors, f"invalid storyboard image {path}: {exc}")
+    manifest_path = chapter_dir / "storyboard_assets_manifest.json"
+    if manifest_path.exists():
+        manifest = load_json(manifest_path, errors)
+        manifest_blocks = (manifest or {}).get("blocks") or []
+        if len(manifest_blocks) != len(blocks):
+            fail(errors, f"storyboard manifest count {len(manifest_blocks)} does not match block count {len(blocks)}")
+        sheets = []
+        for item in manifest_blocks:
+            output = item.get("output")
+            if not output:
+                fail(errors, "storyboard manifest has a block without an output path")
+                continue
+            path = Path(output)
+            if not path.is_absolute():
+                path = chapter_dir / path
+            if not path.exists():
+                fail(errors, f"storyboard manifest points to missing PNG: {path}")
+            else:
+                sheets.append(path)
+        for path in sheets:
+            try:
+                with Image.open(path) as image:
+                    if image.size[0] * 1376 != image.size[1] * 768:
+                        fail(errors, f"storyboard is not 9:16: {path.name} {image.size}")
+                    image.verify()
+            except Exception as exc:
+                fail(errors, f"invalid storyboard image {path}: {exc}")
     for name in ("storyboard_9_16.md", "storyboard_9_16.html"):
         if not (chapter_dir / name).exists():
             fail(errors, f"missing storyboard artifact {chapter_dir / name}")

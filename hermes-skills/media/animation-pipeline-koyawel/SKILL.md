@@ -108,12 +108,8 @@ python3 build_serye_storyboard.py \
   --analysis output/<slug>/ch<N>/chapter_analysis.json \
   --output-dir output/<slug>/ch<N> \
   --pages-per-episode 22
-
-# Render visual storyboard sheets matching selected style:
-python3 compose_chapter_storyboards.py \
-  --chapter-dir output/<slug>/ch<N> \
-  --reference-dir output/<slug>/ch1/character_refs
 ```
+*Note: Visual storyboard PNG sheets (legacy nano_storyboards/) are omitted. The narrative storyboard JSON feeds directly into prompt generation.*
 
 ### Stage 5: Block Prompts (.txt format with @@@NEXT@@@)
 Export plain-text prompts for Google Flow, Kling, or Veo matching the selected style:
