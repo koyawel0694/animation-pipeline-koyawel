@@ -30,6 +30,81 @@ STYLE_LOCK = (
     "STRICTLY NOT 3D render, NOT live-action CGI, NOT photorealistic."
 )
 
+FLOW_POLICY_RULES = [
+    # Restraint & human violence
+    (r"\bforcefully pin(?:s|ned|ning)? down\b", "stand menacingly over"),
+    (r"\bpin(?:s|ned|ning)? down\b", "stand over"),
+    (r"\bpinned under\b", "trapped beneath"),
+    
+    # Human blood, spitting, weeping blood
+    (r"\bweeping and coughing up a stream of dark blood\b", "breathing heavily in exhaustion amidst dark industrial soot"),
+    (r"\bcoughing up a stream of dark blood\b", "coughing heavily amidst dark industrial soot"),
+    (r"\bweeping blood\b", "breathing heavily in exhaustion"),
+    (r"\bspitting blood\b", "breathing heavily in exhaustion"),
+    (r"\bcoughed up blood\b", "gasped for breath amidst soot"),
+    (r"\btear-streaked face stained with blood\b", "tense, determined face marked with dark quarry soot"),
+    
+    # Impalement and extreme gore
+    (r"\bimpales? directly through the protagonist\'s back and torso\b", "strikes powerfully against the protagonist, knocking him down"),
+    (r"\bimpales? straight through the supervisor\'s chest from behind\b", "strikes down against the supervisor from behind in a sudden ambush"),
+    (r"\bimpales? (?:directly |straight )?through\b", "strikes forcefully against"),
+    (r"\bimpaled protagonist\b", "recoiling protagonist"),
+    (r"\bimpaled\b", "struck down"),
+    (r"\bpierces? straight through the supervisor\'s chest from behind\b", "strikes down against the supervisor from behind in a sudden ambush"),
+    (r"\bpierces? straight through\b", "strikes forcefully against"),
+    (r"\bpierces?\b", "strikes"),
+    
+    # Agony, limp body, gore details
+    (r"\bhoists the limp protagonist into the air by the back of his neck and head[^\n,;]*", "looms overpoweringly above the fallen protagonist in the dark quarry"),
+    (r"\bhoists the limp protagonist into the air\b", "towers overpoweringly over the fallen protagonist"),
+    (r"\blimp protagonist\b", "exhausted protagonist"),
+    (r"\bbroken body\b", "weary frame"),
+    (r"\bexcruciating agony\b", "overwhelming shock and strain"),
+    (r"\bscreaming as blood splatters across the arena\b", "shouting as dark kinetic shockwaves ripple across the ground"),
+    
+    # Blood & splatters
+    (r"\bblood splatters? across the dark rock\b", "dark dust and debris scatter across the dark rock"),
+    (r"\bblood splatters? across the arena\b", "dark shockwaves scatter across the ground"),
+    (r"\bblood splatters?\b", "dark shadow particles"),
+    (r"\bblood drips? from his body\b", "dark shadow motes drift from his silhouette"),
+    (r"\bblood drips?\b", "dark motes drift"),
+    (r"\bstream of dark blood\b", "dark shadow motes"),
+    (r"\bbloodshot eye surrounded by crimson blood splatter\b", "wide strained eye surrounded by high-contrast shadowy particles"),
+    (r"\bbloodshot\b", "strained, intense"),
+    (r"\bbattered and bloodied\b", "battered and soot-covered"),
+    (r"\bbloodied\b", "soot-covered"),
+    (r"\bbleeding protagonist\'s face\b", "exhausted protagonist\'s face"),
+    (r"\bbleeding\b", "exhausted"),
+    (r"\bstained with blood\b", "marked with dark quarry soot"),
+    (r"\bblood on (?:his|her|their) knuckles\b", "dark grime on their knuckles"),
+    (r"\bblood\b", "dark soot smudges"),
+    (r"\bbloody\b", "shadowy"),
+    
+    # Crying / weeping / grief
+    (r"\btear-streaked face\b", "tense, soot-stained face"),
+    (r"\btear-streaked\b", "sweat-stained"),
+    (r"\btears on skin\b", "sweat on skin"),
+    (r"\bweeping\b", "grimacing in pain"),
+    (r"\bcrying out in despair\b", "calling out in defiance"),
+    (r"\bcrying\b", "grimacing with exertion"),
+    (r"\bsobbing\b", "gasping for air"),
+    
+    # Slaughter / corpses
+    (r"\bslaughter\b", "frenzied clash"),
+    (r"\bcorpses?\b", "fallen silhouettes"),
+    (r"\bdead bodies\b", "fallen silhouettes"),
+    (r"\bdead miners?\b", "fallen miners"),
+    (r"\bdeadliness\b", "lethal danger"),
+    (r"\bkill(?:ing)?\b", "overpowering"),
+]
+
+
+def sanitize_flow_action(text: str) -> str:
+    """Soft-revise action and camera text to comply with Google Flow safety policies."""
+    for pattern, replacement in FLOW_POLICY_RULES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
 
 def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple[str, dict]:
     """Load an explicit preset, or the chapter's style_selection.json."""
@@ -123,8 +198,8 @@ def format_shot_prompt(
         header,
         f"Create one continuous full-bleed shot for the beat labelled {text(beat.get('label'))}.",
         f"Canonical source scene: {text(beat.get('source_scene_id'))} — {text(beat.get('scene_title'))}.",
-        f"Action and composition: {text(beat.get('action'))}",
-        f"Camera movement: {text(beat.get('camera'))}",
+        f"Action and composition: {sanitize_flow_action(text(beat.get('action')))}",
+        f"Camera movement: {sanitize_flow_action(text(beat.get('camera')))}",
         script_cue(beat),
     ]
     if beat.get("sfx"):
@@ -155,7 +230,7 @@ def format_continuous_prompt(
         beat_lines.append(
             f"Beat {index} ({text(beat.get('timestamp'))}) — {text(beat.get('label'))}: "
             f"Canonical source scene {text(beat.get('source_scene_id'))} ({text(beat.get('scene_title'))}). "
-            f"{text(beat.get('action'))} Camera: {text(beat.get('camera'))}. "
+            f"{sanitize_flow_action(text(beat.get('action')))} Camera: {sanitize_flow_action(text(beat.get('camera')))}. "
             f"{script_cue(beat)}"
         )
     block_target = (

@@ -46,3 +46,18 @@ Continuous prompts (`blockN_video_prompt.txt`) must include the same exact cue f
 When a chapter has > 25 pages, `build_serye_storyboard.py` segments the chapter into 60-second episodes (`ep01`, `ep02`, etc.):
 1. Each episode directory contains a standalone `flow_queue/` with 1-indexed prompts (`block1_prompts.txt` through `block6_prompts.txt`).
 2. Users can open `episodes/ep01/flow_queue/` or `ep02/flow_queue/` and copy-paste each block's prompts directly into Google Flow without manual numbering translation or offset math.
+
+## 5. Content Safety & Flow Guardrails (Bypassing "Harmful Content" False Positives)
+Google Flow and other video generators reject prompts containing graphic human violence, injury, blood, or physical restraint under their "harmful content" safety policies. `build_block_prompts_txt.py` automatically soft-revises prompts to prevent generation failures while preserving exact narrative beats:
+1. **Human Violence & Physical Restraint**:
+   - Never describe human assault or pinning down up close (e.g. "two miners forcefully pin down the protagonist").
+   - Soft-revise to distant silhouettes or standing posture (e.g. "two miners stand menacingly over the protagonist on the floor").
+2. **Human Blood, Gore & Wounds**:
+   - Eliminate all human blood and injury terminology ("coughing up blood", "bleeding face", "spitting blood", "broken body").
+   - Replace with environmental grime, soot, exhaustion, or shadow energy ("breathing heavily in exhaustion amidst dark industrial soot", "weary frame", "dark grime").
+   - Fantasy monster descriptions and alien ichor are permitted; only human injury triggers the filter.
+3. **Crying & Grief**:
+   - Do not use "tear-streaked face stained with blood" or "crying/weeping".
+   - Replace with "tense, determined face marked with quarry soot" or "grimacing with exertion".
+4. **Verbatim Dialogue Preservation**:
+   - The script cue (`MANGA SCRIPT — Speaker: ... Exact line: "..."`) remains exact and untampered; only the descriptive action and camera prompts are sanitized.
