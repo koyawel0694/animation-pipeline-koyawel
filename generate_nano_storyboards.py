@@ -23,8 +23,13 @@ def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple
             selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
         except Exception:
             pass
-    selected = selected or config.get("default_for_unconfigured_chapters", "webtoon_2d")
     presets = config.get("presets", {})
+    if not selected:
+        available = ", ".join(sorted(presets))
+        raise RuntimeError(
+            f"No style preset provided and no style_selection.json found in {chapter_dir}. "
+            f"Pass --style-preset <name>. Available presets: {available}"
+        )
     if selected not in presets:
         available = ", ".join(sorted(presets))
         raise ValueError(f"Unknown style preset {selected!r}; choose one of: {available}")
@@ -104,6 +109,33 @@ CHARACTERS = [
     ("female_interviewer", "FEMALE INTERVIEWER", "Young Korean woman, poised professional broadcast interviewer, neatly styled dark chin-length bob, refined facial features, calm inquisitive eyes. Wardrobe anchor: tailored navy blue blazer, dark blouse, interview cue cards. Include front full-body, 3/4 portrait, side profile, seated interview pose."),
     ("spirit_shaman", "SPIRIT SHAMAN AND FLAMING EAGLE", "Supernatural Korean shamanic spirit with an aged expressive face, ornate traditional ceremonial headdress, layered green and gold ritual robes, pale glowing eyes, surrounded by controlled emerald mist. Include a separate flaming eagle manifestation: realistic bald eagle with outstretched wings, radiant golden-pink flame aura, physically detailed feathers. Clearly separate human spirit and eagle forms in one reference sheet."),
 ]
+
+
+def load_characters(chapter_dir: Path, characters_file: Path | None = None) -> list[tuple[str, str, str]]:
+    """Load character definitions from characters.json if present, or fallback to default."""
+    paths_to_check = []
+    if characters_file:
+        paths_to_check.append(characters_file)
+    paths_to_check.extend([
+        chapter_dir / "characters.json",
+        chapter_dir.parent / "characters.json",
+    ])
+    for p in paths_to_check:
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                result = []
+                for item in data:
+                    slug = item.get("slug")
+                    name = item.get("name")
+                    details = item.get("details")
+                    if slug and name and details:
+                        result.append((slug, name, details))
+                if result:
+                    return result
+            except Exception as e:
+                print(f"[WARN] Failed to parse {p}: {e}", file=sys.stderr)
+    return CHARACTERS
 
 BLOCKS = [
     ("block01_the_question", "Block 1 — The Question That Changes Everything", ["page_001.webp", "page_002.webp"], ["Street Interview Opening", "The Hundred Million Won Question", "The Slothful Dream", "The Ultimate Hypothetical Question", "The Final Question", "The Realistic Inquiry"]),
@@ -216,6 +248,7 @@ def main():
     ap.add_argument("--storyboards", action="store_true")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--style-preset", default=None, help="Art style preset from style_presets.json")
+    ap.add_argument("--characters-file", type=Path, default=None, help="Path to characters.json definition file")
     args = ap.parse_args()
     base, ref_dir, sb_dir = chapter_paths(args.chapter_dir.resolve(), args.reference_dir)
     if args.reference_dir:
@@ -243,7 +276,8 @@ def main():
     manga_title = metadata.get("title") or "Manga Chapter"
 
     if (args.characters or args.all) and not args.reference_dir:
-        for slug, name, details in CHARACTERS:
+        active_characters = load_characters(base, args.characters_file)
+        for slug, name, details in active_characters:
             out = ref_dir / f"{slug}_ref.png"
             print(f"[CHARACTER] {name} -> {out} [{selected_style}]", flush=True)
             run(make_character_prompt(name, details, out, profile))

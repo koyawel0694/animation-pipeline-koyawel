@@ -161,6 +161,8 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
         print("=" * 60)
         try:
             choice = input(f"Enter choice [1-{len(preset_keys)}] (default: 1): ").strip()
+            if not choice:
+                return preset_keys[0]
             if choice.isdigit() and 1 <= int(choice) <= len(preset_keys):
                 return preset_keys[int(choice) - 1]
             elif choice in presets:
@@ -168,7 +170,11 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
         except (EOFError, KeyboardInterrupt):
             pass
 
-    return config.get("default_for_unconfigured_chapters", "webtoon_2d")
+    available = ", ".join(sorted(presets))
+    raise RuntimeError(
+        f"No art/animation style preset selected and no style_selection.json found in {chapter_dir}.\n"
+        f"Specify --style-preset <name>. Available presets: {available}"
+    )
 
 
 def run_storyboard_assets(chapter_dir: Path, python_bin: str, style_preset: str | None = None):

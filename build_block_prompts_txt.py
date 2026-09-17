@@ -34,8 +34,13 @@ def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple
     selected = requested
     if not selected and selection.exists():
         selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
-    selected = selected or config.get("default_for_unconfigured_chapters", "webtoon_2d")
     presets = config.get("presets") or {}
+    if not selected:
+        available = ", ".join(sorted(presets))
+        raise RuntimeError(
+            f"No style preset provided and no style_selection.json found in {chapter_dir}. "
+            f"Pass --style-preset <name>. Available presets: {available}"
+        )
     if selected not in presets:
         available = ", ".join(sorted(presets))
         raise ValueError(f"Unknown style preset {selected!r}; choose one of: {available}")

@@ -75,19 +75,23 @@ Reference example on disk: `/home/john/manga-reviews/output/the-investor-who-see
 ### Stage 0: Mandatory Art & Animation Style Selection (Prompt User First)
 
 **CRITICAL AGENT RULE**:
-Before generating ANY visual assets (character reference model sheets, storyboards, or block prompts), you **MUST** ask the user to choose their preferred art/animation style using the `clarify` tool, UNLESS they already explicitly specified it in their prompt!
+Before generating ANY visual assets (character reference model sheets, storyboards, or block prompts), you **MUST** ask the user to choose their preferred art and animation style using the `clarify` tool, UNLESS they already explicitly specified it in their prompt!
 
-Never proceed to Stage 3 (Character Reference Model Sheets) or Stage 4 (Storyboards) without confirming the user's preferred style!
+**STRICT RULE**:
+- NEVER silently default to 2D manhwa or any other style.
+- NEVER assume or default based on previous sessions, memory profile notes (e.g. 'Manga: 2D anime'), or other series.
+- Fabricating `selected_by_user: true` in `style_selection.json` without asking the user via `clarify` is strictly forbidden.
+- Never proceed to Stage 3 (Character Reference Model Sheets) or Stage 4 (Storyboards) without confirming the user's preferred style!
 
-Present the choices:
-1. Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)
-2. Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)
-3. 2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)
-4. Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)
-5. Stylized 3D Animated Film (Pixar/DreamWorks style 3D characters, tactile materials)
-6. Dark Fantasy Anime (gritty chiaroscuro, heavy ink shadows, glowing magical auras)
+Present the choices via `clarify`:
+1. "Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)"
+2. "Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)"
+3. "2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)"
+4. "Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)"
+5. "Stylized 3D Animated Film (Pixar/DreamWorks style 3D characters, tactile materials)"
+6. "Dark Fantasy Anime (gritty chiaroscuro, heavy ink shadows, glowing magical auras)"
 
-Save choice to `output/<slug>/ch<N>/style_selection.json` and pass `--style-preset <PRESET>` to `generate_nano_storyboards.py` and `build_block_prompts_txt.py`.
+Save choice to `output/<slug>/ch<N>/style_selection.json` and pass `--style-preset <PRESET>` to `generate_nano_storyboards.py`, `build_block_prompts_txt.py`, and `manga_pipeline.py`.
 
 ### Stage 1: Scrape Chapter Panels
 ```bash
@@ -138,7 +142,7 @@ Export plain-text prompts for video generators (Google Flow, Kling, Runway):
 python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N>
 ```
 Output: `flow_queue/block[1-6]_prompts.txt` (each containing 6 shot prompts separated by `\n\n@@@NEXT@@@\n\n`), `block[1-6]_video_prompt.txt`, and `flow_6_continuous_blocks.txt`.
-- Style lock: 2D Korean webtoon manhwa anime animation, dark ink lines, cel-shaded, NOT 3D, NOT photorealistic.
+- Style lock: Follows the selected preset from Stage 0 (e.g. 2D Korean webtoon, Anime Sakuga, Studio Ghibli, Dark Fantasy Anime, Photorealistic Live-Action, etc.) via style_presets.json. Prompt directives use style_anchor and motion_anchor.
 - Dialogue: Spoken English lines with parenthesized emotion cues: `(energetic, broadcast tone) ...`
 - Freeze frame: Beat 6 explicitly ends with: `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
 

@@ -45,6 +45,24 @@ class StylePresetTests(unittest.TestCase):
             self.assertEqual(selected, "motion_comic_2d")
             self.assertIn("motion-comic", profile["style_anchor"])
 
+    def test_unconfigured_chapter_raises_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError) as ctx:
+                load_style_profile(Path(tmp))
+            self.assertIn("No style preset provided", str(ctx.exception))
+
+    def test_characters_loaded_from_json(self):
+        from generate_nano_storyboards import load_characters
+        with tempfile.TemporaryDirectory() as tmp:
+            ch_dir = Path(tmp)
+            custom_chars = [
+                {"slug": "test_hero", "name": "TEST HERO", "details": "Hero details here"}
+            ]
+            (ch_dir / "characters.json").write_text(json.dumps(custom_chars))
+            loaded = load_characters(ch_dir)
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0], ("test_hero", "TEST HERO", "Hero details here"))
+
 
 if __name__ == "__main__":
     unittest.main()
