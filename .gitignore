@@ -1,0 +1,27 @@
+# Environment & Secrets
+.env
+.env.*
+*.env
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Media & Large Scrapes
+*.mp4
+*.mp3
+*.wav
+*.webp
+*.jpg
+*.jpeg
+*.png
+output/
+from-goblin-to-goblin-god/
+
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/

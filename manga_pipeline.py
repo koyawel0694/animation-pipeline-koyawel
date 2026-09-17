@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""
+manga_pipeline.py — Master Orchestrator for Manga/Manhua/Manhwa Video Pipeline.
+
+End-to-End Production Pipeline:
+  [Stage 1: Source Discovery & Scraper]
+      - Finds manga on MangaDex API or webtoon reader fallback
+      - Interactive / CLI chapter selection ("How many chapters to scrape?")
+      - Downloads all pages/panels cleanly into output/<manga>/ch<num>/images/
+      ↓
+  [Stage 2: Canonical Sequential Image Analysis]
+      - Single sequential reader using Google Antigravity CLI (agy --effort medium)
+      - Maintains strict chronological story continuity across all pages
+      - Exports canonical `chapter_analysis.json`
+      ↓
+  [Stage 3: Downstream Video & Storyboard Specialization]
+      ├─ Subagent 1 & 2: Scene-level dialogue script + video prompts -> video_prompts.csv
+      ├─ Subagent 3: 10-second SERYE Drama Storyboard Blocks (6 beats per block, timestamps, freeze frame)
+      ├─ Character Ref Sheets: 9:16 multi-view model sheets via Nano Banana Pro
+      └─ Block prompt TXT package (one plain-text file per storyboard block)
+      ↓
+  [Stage 4: Optional downstream video generation]
+      - Use clean single-frame crops or character refs as ingredients when requested
+
+Usage:
+  Interactive:
+    python3 manga_pipeline.py
+  CLI Full End-to-End:
+    python3 manga_pipeline.py --title "The Investor Who Sees The Future" --chapters 1
+  Run on existing scraped chapter:
+    python3 manga_pipeline.py --existing-dir ./output/the-investor-who-sees-the-future/ch1
+  Run specific stages only:
+    python3 manga_pipeline.py --existing-dir ./output/the-investor-who-sees-the-future/ch1 --stage flow
+"""
+
+import os
+import sys
+import json
+import time
+import argparse
+import subprocess
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from manga_source_scraper import run_pipeline_source_flow
+
+
+def print_banner(text: str):
+    line = "=" * 68
+    print(f"\n{line}")
+    print(f"  {text}")
+    print(f"{line}\n")
+
+
+def run_command(cmd: list[str], label: str):
+    print(f"[RUNNING] {label}...")
+    t0 = time.time()
+    res = subprocess.run(cmd, cwd=str(SCRIPT_DIR), text=True)
+    dt = time.time() - t0
+    if res.returncode != 0:
+        print(f"[FAILED] {label} (exit code {res.returncode})")
+        sys.exit(res.returncode)
+    print(f"[OK] {label} finished in {dt:.1f}s\n")
+
+
+def resolve_character_reference_dir(chapter_dir: Path) -> Path:
+    """Reuse sibling Chapter 1 character refs for later chapters."""
+    chapter_dir = chapter_dir.resolve()
+    chapter_one = chapter_dir.parent / "ch1" / "character_refs"
+    if chapter_one.is_dir():
+        return chapter_one
+    return chapter_dir / "character_refs"
+
+
+def visual_generation_command(
+    chapter_dir: Path,
+    python_bin: str,
+    reference_dir: Path | None = None,
+) -> list[str]:
+    """Return legacy Nano command using shared character refs."""
+    reference_dir = reference_dir or resolve_character_reference_dir(chapter_dir)
+    return [
+        python_bin,
+        str(SCRIPT_DIR / "generate_nano_storyboards.py"),
+        "--chapter-dir",
+        str(chapter_dir),
+        "--reference-dir",
+        str(reference_dir),
+        "--all",
+    ]
+
+
+def storyboard_asset_command(
+    chapter_dir: Path,
+    python_bin: str,
+    reference_dir: Path | None = None,
+) -> list[str]:
+    """Return deterministic storyboard-sheet compositor command."""
+    reference_dir = reference_dir or resolve_character_reference_dir(chapter_dir)
+    return [
+        python_bin,
+        str(SCRIPT_DIR / "compose_chapter_storyboards.py"),
+        "--chapter-dir",
+        str(chapter_dir),
+        "--reference-dir",
+        str(reference_dir),
+    ]
+
+
+def character_generation_command(chapter_dir: Path, python_bin: str) -> list[str]:
+    """Return first-chapter character-reference generation command."""
+    return [
+        python_bin,
+        str(SCRIPT_DIR / "generate_nano_storyboards.py"),
+        "--chapter-dir",
+        str(chapter_dir),
+        "--characters",
+    ]
+
+
+def run_storyboard_assets(chapter_dir: Path, python_bin: str):
+    """Ensure identity refs exist, then build chapter storyboard PNGs."""
+    refs = resolve_character_reference_dir(chapter_dir)
+    if not refs.is_dir() or not list(refs.glob("*.png")):
+        run_command(
+            character_generation_command(chapter_dir, python_bin),
+            label="Initial Character Reference Generator",
+        )
+        refs = chapter_dir / "character_refs"
+    run_command(
+        storyboard_asset_command(chapter_dir, python_bin, refs),
+        label="Character-Referenced Storyboard Sheet Composer",
+    )
+
+
+def orchestrate_manga_pipeline(
+    title_or_url: str = None,
+    num_chapters: int = None,
+    max_pages_per_ch: int = None,
+    existing_dir: str = None,
+    stage: str = "all",
+    output_base: str | None = None,
+) -> list[Path]:
+    base_out = Path(output_base or (SCRIPT_DIR / "output")).resolve()
+    base_out.mkdir(parents=True, exist_ok=True)
+    python_bin = sys.executable
+
+    target_chapter_dirs = []
+
+    # Step 1: Resolve target chapter directories
+    if existing_dir:
+        ed = Path(existing_dir).resolve()
+        if not ed.exists():
+            raise FileNotFoundError(f"Existing directory not found: {ed}")
+        target_chapter_dirs.append(ed)
+        print_banner(f"USING EXISTING CHAPTER DIRECTORY: {ed.name}")
+    else:
+        print_banner("STAGE 1: SOURCE DISCOVERY & CHAPTER SCRAPING")
+        scraped_metas = run_pipeline_source_flow(
+            input_target=title_or_url,
+            num_chapters=num_chapters,
+            output_base=base_out,
+            max_pages_per_ch=max_pages_per_ch,
+        )
+
+        if not scraped_metas:
+            print("[ABORT] No chapters were downloaded or selected.")
+            return []
+
+        for meta in scraped_metas:
+            ch_num = meta["chapter"]["chapter"]
+            images = meta.get("images", [])
+            if images:
+                ch_dir = Path(images[0]).parent.parent
+            else:
+                manga_slug = meta.get("title", "manga").lower().replace(" ", "-")
+                ch_dir = base_out / manga_slug / f"ch{ch_num}"
+            target_chapter_dirs.append(ch_dir)
+
+    # Process each chapter
+    for ch_dir in target_chapter_dirs:
+        print_banner(f"PROCESSING CHAPTER: {ch_dir.name}")
+        ch_dir = ch_dir.resolve()
+
+        # Stage: Canonical Sequential Image Analysis
+        if stage in ("all", "analyze"):
+            print_banner("STAGE 2: CANONICAL SEQUENTIAL IMAGE ANALYSIS")
+            analysis_script = SCRIPT_DIR / "sequential_chapter_analysis.py"
+            run_command(
+                [python_bin, str(analysis_script), "--chapter-dir", str(ch_dir)],
+                label="Sequential Canonical Analysis (agy --effort medium)",
+            )
+
+        # Stage: Scene-Level Prompts & Dialogue CSV
+        if stage in ("all", "prompts"):
+            print_banner("STAGE 3A: SCENE PROMPTS & DIALOGUE EXTRACTION")
+            prompts_script = SCRIPT_DIR / "script_and_prompt_engine.py"
+            csv_path = ch_dir / "video_prompts.csv"
+            run_command(
+                [python_bin, str(prompts_script), "--chapter-dir", str(ch_dir), "--output-csv", str(csv_path)],
+                label="Subagent 1 & 2 Scene Engine",
+            )
+
+        # Stage: 10-Second SERYE Drama Storyboard Blocks
+        if stage in ("all", "storyboard", "visuals"):
+            print_banner("STAGE 3B: 10-SECOND SERYE DRAMA STORYBOARD BLOCKS")
+            serye_script = SCRIPT_DIR / "build_serye_storyboard.py"
+            canon_json = ch_dir / "chapter_analysis.json"
+            if canon_json.exists():
+                run_command(
+                    [python_bin, str(serye_script), "--analysis", str(canon_json), "--output-dir", str(ch_dir)],
+                    label="SERYE 10s Storyboard Blocks Builder",
+                )
+            else:
+                print(f"[WARN] {canon_json} not found. Skipping SERYE storyboard generation.")
+
+        # Stage: Character identity refs + visual storyboard sheets
+        # Reuse established Chapter 1 refs; compose chapter-local sheets.
+        if stage in ("all", "storyboard", "visuals"):
+            print_banner("STAGE 3C: CHARACTER REFS + STORYBOARD PNGs")
+            storyboard_json = ch_dir / "storyboard_9_16.json"
+            prompts_csv = ch_dir / "video_prompts.csv"
+            if storyboard_json.exists() and prompts_csv.exists():
+                run_storyboard_assets(ch_dir, python_bin)
+            else:
+                missing = [str(path) for path in (prompts_csv, storyboard_json) if not path.exists()]
+                print(f"[WARN] Missing required upstream artifact(s): {', '.join(missing)}. Skipping visual asset generation.")
+
+        # Stage: plain-text block prompts
+        if stage in ("all", "flow"):
+            print_banner("STAGE 3D: BLOCK PROMPTS (PLAIN TEXT)")
+            prompt_txt_script = SCRIPT_DIR / "build_block_prompts_txt.py"
+            run_command(
+                [python_bin, str(prompt_txt_script), "--chapter-dir", str(ch_dir)],
+                label="Chapter Block Prompt TXT Exporter",
+            )
+
+        # Print Final Deliverables Summary for Chapter
+        print_banner("CHAPTER PRODUCTION DELIVERABLES READY")
+        print(f"Target Directory: {ch_dir}\n")
+        print("Key Artifacts Generated:")
+        print(f"1. Canonical Story Analysis:     {ch_dir / 'chapter_analysis.json'}")
+        print(f"2. Scene-Level Video Prompts:    {ch_dir / 'video_prompts.csv'}")
+        print(f"3. SERYE 10s Storyboard Markdown: {ch_dir / 'storyboard_9_16.md'}")
+        print(f"4. SERYE 10s Storyboard HTML:     {ch_dir / 'storyboard_9_16.html'}")
+        print(f"5. Character Reference Sheets:   {ch_dir / 'character_refs'}")
+        print(f"6. 10s Visual Storyboard Sheets: {ch_dir / 'nano_storyboards'}")
+        print(f"7. Visual Master Gallery:        {ch_dir / 'gallery.html'}")
+        print(f"8. Block Prompt TXT Files:          {ch_dir / 'flow_queue'}")
+        print("-" * 68)
+
+    print_banner("PIPELINE COMPLETE — CHAPTER ASSET PACK READY")
+    return target_chapter_dirs
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Master Manga Video Pipeline Orchestrator")
+    parser.add_argument("--title", "-t", default=None, help="Manga title to search")
+    parser.add_argument("--url", "-u", default=None, help="Manga URL to scrape")
+    parser.add_argument("--chapters", "-c", type=int, default=None, help="How many chapters to scrape")
+    parser.add_argument("--max-pages", "-m", type=int, default=None, help="Max pages per chapter")
+    parser.add_argument("--existing-dir", "-e", default=None, help="Process an existing chapter directory")
+    parser.add_argument("--stage", default="all", choices=["all", "scrape", "analyze", "prompts", "storyboard", "visuals", "flow"], help="Run specific pipeline stage")
+    parser.add_argument("--output-base", "-o", default=None, help="Output base directory (defaults to ./output)")
+    args = parser.parse_args()
+
+    target = args.url or args.title
+    orchestrate_manga_pipeline(
+        title_or_url=target,
+        num_chapters=args.chapters,
+        max_pages_per_ch=args.max_pages,
+        existing_dir=args.existing_dir,
+        stage=args.stage,
+        output_base=args.output_base,
+    )
+
+
+if __name__ == "__main__":
+    main()

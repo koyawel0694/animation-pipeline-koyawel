@@ -1,0 +1,144 @@
+---
+name: manga-video-storyboard-pipeline
+description: "Use when storyboarding manga chapters into video blocks."
+version: 1.0.0
+author: John, Hermes Agent
+license: MIT
+platforms: [linux]
+metadata:
+  hermes:
+    tags: [manga, manhwa, scraping, character-refs, storyboards, block-prompts, video]
+    category: media
+    related_skills: [ai-drama-series-pipeline, ai-video-content-qa, serye-web]
+---
+
+# Manga Video Storyboard Pipeline
+
+Turns one scraped manga/manhwa/manhua chapter into production-ready short-form video assets:
+1. **Scraped chapter panels**: Clean, numbered narrative pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
+2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) on neutral studio backdrops (front full-body, 3/4 portrait, side profile, action pose) as shown in `image-2.png`.
+3. **9:16 vertical storyboards**: 10-second SERYE drama director sheets (`768x1376`, 5 rows: 2+1+2+2+1, 6 beats with timestamps, ending on freeze frame) in `nano_storyboards/` as shown in `image-3.png` and `image-4.png`.
+4. **Block prompts only in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/` as shown in `image-5.png`.
+
+No final video rendering, no narration audio generation, no review prose, and no CSV files required (disregard legacy CSV and manual video rendering flows).
+
+## When to Use
+
+- Scrape manga/manhwa/manhua panels from a URL or title into clean chapter assets.
+- Generate or reuse series character model sheets (9:16 PNGs) for visual consistency.
+- Build 9:16 vertical 10-second drama storyboard sheets (5 rows: 2+1+2+2+1) from chapter scenes.
+- Export shot-by-shot and continuous block prompts in plain `.txt` format with `@@@NEXT@@@`.
+- Verify a chapter's visual assets against the production contract.
+
+Don't use for: video rendering, audio/TTS synthesis, or CSV queue generation (plain `.txt` format is the deliverable).
+
+## Prerequisites
+
+- Working directory: `/home/john/manga-reviews/`
+- Python virtualenv: `~/.venv_manga/` (Python 3.12 with PIL/Pillow, requests, bs4)
+- Verification script: `/home/john/manga-reviews/verify_manga_chapter_assets.py`
+- Test suite: `python3 -m unittest discover -s /home/john/manga-reviews/tests`
+
+## Directory & Asset Structure
+
+```text
+output/<series-slug>/ch<chapter>/
+  images/
+    page_001.webp (or .png, .jpg)
+    page_002.webp
+    ...
+  metadata.json
+  chapter_analysis.json
+  character_refs/
+    <character_slug>_ref.png              # 768x1376 9:16 PNG model sheets
+  character_refs_source.json              # Provenance manifest (reused for Ch2+)
+  storyboard_9_16.json                    # Canonical storyboard metadata
+  storyboard_9_16.md / .html              # Production documentation
+  nano_storyboards/
+    block01_<slug>.png                    # 768x1376 9:16 SERYE storyboard sheet
+    block02_<slug>.png
+    ...
+  storyboard_assets_manifest.json
+  flow_queue/
+    block1_prompts.txt                    # 6 shots separated by @@@NEXT@@@
+    block1_video_prompt.txt               # Continuous 10s master block prompt
+    ...
+    flow_6_continuous_blocks.txt          # All blocks combined with @@@NEXT@@@
+    flow_all_36_shots.txt                 # Flat shots combined
+    prompt_txt_manifest.json              # Manifest of all text prompts
+```
+
+Reference example on disk: `/home/john/manga-reviews/output/the-investor-who-sees-the-future/ch1/`.
+
+## End-to-End Execution Workflow
+
+### Stage 1: Scrape Chapter Panels
+```bash
+cd /home/john/manga-reviews
+source ~/.venv_manga/bin/activate
+
+# Discover and scrape via MangaDex API or webtoon mirrors:
+python3 manga_source_scraper.py --query "<Manga Title>" --chapters 1
+
+# Or download directly from chapter URL:
+python3 scrape_manga.py "<Chapter URL>" --output-dir output/<slug>/ch<N>
+```
+Verify: Numbered pages in `output/<slug>/ch<N>/images/` must be 1-indexed and contiguous (`page_001`, `page_002`, ...). Strip any reader credit cards, advertisements, or scanlation recruitment inserts.
+
+### Stage 2: Canonical Sequential Image Analysis
+Always analyze pages sequentially in chronological order (never parallelize vision reading):
+```bash
+python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch<N>
+```
+Output: `chapter_analysis.json` containing exact dialogue, parenthesized vocal emotion tags `(emotion, tone)`, scene action, camera movement, and visual FX.
+
+### Stage 3: Character Reference Model Sheets (image-2.png)
+- For Chapter 1: Create 9:16 vertical PNG model sheets (`768x1376`) for recurring characters:
+  ```bash
+  python3 generate_nano_storyboards.py --chapter-dir output/<slug>/ch1 --characters
+  ```
+  Each sheet features clean neutral studio backdrop (`#F4F4F4`), character name banner, front full-body view, 3/4 portrait, side profile, and casual/action pose.
+- For Chapter 2+: **Reuse Chapter 1 character references** to preserve visual identity across the series:
+  ```bash
+  python3 generate_nano_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
+  ```
+  Writes `character_refs_source.json` pointing to Chapter 1 without duplicate files.
+
+### Stage 4: 9:16 Vertical Storyboards (image-3.png & image-4.png)
+Generate 10-second SERYE drama storyboard sheets (`768x1376`, 5 rows: 2+1+2+2+1 = 8 distinct shots, 6 timing beats ending on freeze frame):
+```bash
+# Build storyboard metadata:
+python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N>
+
+# Compose visual storyboard sheets:
+python3 compose_chapter_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
+```
+Output: `nano_storyboards/block01_*.png` through `block06_*.png` matching the exact layout in `image-4.png`.
+
+### Stage 5: Block Prompts Only in .txt Format (image-5.png)
+Export plain-text prompts for video generators (Google Flow, Kling, Runway):
+```bash
+python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N>
+```
+Output: `flow_queue/block[1-6]_prompts.txt` (each containing 6 shot prompts separated by `\n\n@@@NEXT@@@\n\n`), `block[1-6]_video_prompt.txt`, and `flow_6_continuous_blocks.txt`.
+- Style lock: 2D Korean webtoon manhwa anime animation, dark ink lines, cel-shaded, NOT 3D, NOT photorealistic.
+- Dialogue: Spoken English lines with parenthesized emotion cues: `(energetic, broadcast tone) ...`
+- Freeze frame: Beat 6 explicitly ends with: `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
+
+### Stage 6: Verify Assets
+Run the automated contract verifier:
+```bash
+python3 verify_manga_chapter_assets.py --chapter-dir output/<slug>/ch<N>
+```
+Must pass with exit code 0:
+`[OK] output/<slug>/ch<N>: N pages, 6 blocks, 36 beats verified`
+
+## Pitfalls & Core Rules
+
+1. **TXT Format Only**: The user requires `.txt` files with `@@@NEXT@@@`. Do NOT generate or deliver CSV queues unless explicitly requested.
+2. **Sequential Vision Only**: Never parallelize page analysis across multiple workers. Single sequential reader preserves chronology, character names, and dramatic tension.
+3. **Reuse Character References**: Never regenerate character model sheets on later chapters; always link back to Chapter 1 references via `character_refs_source.json`.
+4. **Storyboards Are Not Direct Inputs**: The 9:16 storyboard sheet (`image-4.png`) is a director overview guide containing panel borders and headers. Generative video tools take single-panel narrative crops or prompt text, not the combined sheet collage.
+5. **No Scanlation Watermarks**: Exclude all promotional inserts, scanlator credits, and aggregator logos from narrative panels and storyboard crops.
+6. **Strict 2D Aesthetic**: Every prompt locks 2D cel-shaded webtoon/anime animation; explicitly ban 3D CGI and photorealistic rendering.
+7. **Parenthesized Emotion Tags**: Dialogue emotion cues must be inside parentheses at the start of the quote `(emotion, tone) Dialogue...`.

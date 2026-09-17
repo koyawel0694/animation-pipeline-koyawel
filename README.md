@@ -1,65 +1,135 @@
 # animation-pipeline-koyawel
 
-Reusable style and prompt profiles for the manga/manhwa/webtoon-to-video pipeline.
+Production-grade automated AI animation and video production pipeline converting manga, manhwa, manhua, and webtoons into short-form vertical video assets (TikTok, YouTube Shorts, Reels, Google Flow, Kling).
 
-The project default selected for the current series is:
+This repository contains the complete pipeline toolset (formerly `manga-video-pipeline`), style presets, verification utilities, and bundled Hermes Agent skills.
 
-`photorealistic_live_action`
+---
 
-This means a live-action adaptation with real human performers, grounded sets and props, cinematic lenses, natural skin and lighting, and practical/CGI fantasy effects integrated into the photographed scene.
+## 🎬 Architecture & Workflow
 
-The repository also keeps separate alternatives:
+```
+[User Input: Manga Link or Title]
+               │
+               ▼
+[Stage 1: Source Discovery & Chapter Scraper]
+  ├─ MangaDex API Search & Title Resolution
+  ├─ Webtoon Reader Fallback
+  └─ Downloads panels into: output/<slug>/ch<num>/images/
+               │
+               ▼
+[Stage 2: Canonical Sequential Image Analysis]
+  └─ Single sequential reader via Google Antigravity CLI (agy --effort medium)
+  └─ Preserves character names, chronology, exact dialogue, and story flow
+  └─ Exports: output/<slug>/ch<num>/chapter_analysis.json
+               │
+               ▼
+[Stage 3: Character References & Model Sheets]
+  ├─ 9:16 Model Sheets on neutral studio backdrops (768x1376)
+  ├─ Front full-body, 3/4 portrait, side profile, and action pose
+  └─ Output: output/<slug>/ch<num>/character_refs/
+               │
+               ▼
+[Stage 4: 9:16 Vertical Storyboards]
+  ├─ 10-Second SERYE Drama Storyboard Blocks (5 rows: 2+1+2+2+1 = 8 shots)
+  ├─ 6 timestamped beats per block ending on freeze frame
+  └─ Output: output/<slug>/ch<num>/nano_storyboards/
+               │
+               ▼
+[Stage 5: Block Prompts (.txt format with @@@NEXT@@@)]
+  ├─ Plain-text Flow/Kling prompt files
+  ├─ Multi-style presets (photorealistic live action, 2D webtoon, sakuga, motion comic)
+  └─ Output: output/<slug>/ch<num>/flow_queue/
+               │
+               ▼
+[Stage 6: Asset Verification]
+  └─ verify_manga_chapter_assets.py validates chapter contract
+```
 
-- `webtoon_2d` — Korean webtoon/manhwa line art, full-color cel shading, controlled 2D animation.
-- `anime_sakuga_2d` — higher-energy hand-drawn key poses, dynamic perspective, impact frames, and speed effects.
-- `motion_comic_2d` — source-faithful art with multiplane parallax, pans/zooms, and selective movement.
-- `photorealistic_live_action` — the selected default for the current experiment.
+---
 
-## Character-consistency rule
+## 🎨 Selectable Style Profiles
 
-Chapter 0 is the canonical character-reference chapter. The existing Chapter 0 2D references are provisional because the final series style was selected afterward.
+The pipeline supports configurable visual style presets via `style_presets.json`:
 
-Before producing the full story, regenerate the Chapter 0 character references once in the approved final style. Then reuse that exact reference set from Chapter 1 through the last chapter. Do not regenerate character sheets independently for every chapter.
+1. **`photorealistic_live_action`**: Live-action cinematic adaptation with real human performers, grounded sets, cinematic lenses, natural skin/lighting, and practical/CGI fantasy effects integrated into the live plate.
+2. **`webtoon_2d`**: Authentic Korean webtoon manhwa anime animation with crisp clean dark ink lines, vibrant flat cel-shaded coloring, and controlled 2D animation.
+3. **`anime_sakuga_2d`**: High-energy hand-drawn key poses, dynamic perspective, impact frames, speed effects, and expressive smears.
+4. **`motion_comic_2d`**: Source-faithful artwork with multiplane parallax depth, camera pans, zooms, and selective movement.
 
-For the selected live-action mode, create a separate live-action reference set rather than feeding 2D model sheets directly into a photorealistic video prompt. A 2D sheet can preserve design intent, but live-action references should show the translated casting, wardrobe, props, creature scale, and lighting language.
+### Selecting a Style
 
-The policy is recorded in `character_reference_policy.md` and `project_style_selection.json`.
-
-## Prompt exporter
-
-`build_block_prompts_txt.py` exports the existing canonical `storyboard_9_16.json` into plain-text prompt files with `@@@NEXT@@@` delimiters.
-
-Choose a style explicitly:
+Pass `--style-preset` to `build_block_prompts_txt.py`:
 
 ```bash
 python3 build_block_prompts_txt.py \
-  --chapter-dir /path/to/chapter \
+  --chapter-dir output/<slug>/ch<N> \
   --style-preset photorealistic_live_action
 ```
 
-If a chapter contains `style_selection.json`, the exporter uses its `default_preset`. Otherwise it falls back to `webtoon_2d`.
+If a chapter contains `style_selection.json`, the exporter uses its `default_preset`. Otherwise it defaults to `webtoon_2d`.
 
-No storyboard sheets, videos, audio, or chapter-wide prompt batches are generated by this repository until the style lock and canonical references are approved.
+---
 
-## Flow/reference workflow
+## 👤 Character Consistency Rule
 
-Use clean, plain-background identity references as ingredients and keep the wording consistent with the supplied images. For live action, use separate actor/creature reference images and state that they are identity anchors translated into a grounded photographed scene. Do not combine a 2D negative lock such as “not photorealistic” with the live-action preset.
+- **Chapter 0 / Chapter 1 Canonical Anchor**: The first chapter establishes canonical character reference model sheets.
+- **Reusability**: Downstream chapters reuse existing character reference sheets to maintain visual identity across the entire series. Do not regenerate character references independently per chapter.
+- **Cross-Style Translation**: When adapting from 2D comic art to live action, generate translated live-action actor/costume reference sheets rather than feeding 2D line art directly into photorealistic prompts.
+- Recorded in `character_reference_policy.md` and `project_style_selection.json`.
 
-The prompt structure follows the recommended order of visual style, subject/action, environment, camera, lighting, character details, and sound design.[1] Google Flow’s reference workflow is used for cross-clip character and key-object consistency.[2] The available Flow model features and reference-video constraints should be checked before a batch run.[3]
+---
 
-## Research basis
+## 🚀 Quick Start & CLI Usage
 
-The 2D preset uses cel shading, clean ink, controlled key poses, and limited animation deliberately. Cel shading is associated with a stylized hand-drawn/2D appearance, while limited animation reuses selected drawings and concentrates movement on key action, camera, and effects.[4][5] WEBTOON’s own format documentation illustrates the vertical mobile panel workflow that this pipeline targets.[6]
+### 1. Scrape Chapter
+```bash
+python3 manga_source_scraper.py --url "<MANGA_URL>" --output-dir output/<slug>/ch1
+```
 
-## Current series lock
+### 2. Sequential Chapter Analysis
+```bash
+python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch1
+```
 
-See `/home/john/manga-reviews/output/im-the-max-level-newbie/series_style_lock.json` for the local Chapter 0 policy. The local chapter assets are intentionally left unregenerated until the final live-action reference sheets are approved.
+### 3. Generate Storyboard Metadata & Sheets
+```bash
+python3 build_serye_storyboard.py --analysis output/<slug>/ch1/chapter_analysis.json --output-dir output/<slug>/ch1
+python3 compose_chapter_storyboards.py --chapter-dir output/<slug>/ch1 --reference-dir output/<slug>/ch1/character_refs
+```
 
-## Sources
+### 4. Build Block Prompts in Plain .txt Format
+```bash
+python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch1 --style-preset photorealistic_live_action
+```
 
-[1] https://deepmind.google/models/veo/prompt-guide
-[2] https://support.google.com/flow/answer/16353334?hl=en
-[3] https://support.google.com/flow/answer/16352836?hl=en
-[4] https://www.toonboom.com/sunshine-animation-on-re-animating-sword-of-the-necromancer
-[5] https://www.adobe.com/uk/creativecloud/animation/discover/cel-shading.html
-[6] https://www.webtoons.com/en/canvas/webtoon-format/list?title_no=109936
+### 5. Verify Chapter Production Assets
+```bash
+python3 verify_manga_chapter_assets.py output/<slug>/ch1
+```
+
+---
+
+## 🤖 Bundled Hermes Agent Skills
+
+The repository bundles Hermes Agent skills under `hermes-skills/media/`:
+
+- **`animation-pipeline-koyawel`**: End-to-end asset and prompt pipeline workflow for this repository.
+- **`manga-video-storyboard-pipeline`**: Detailed operational specifications for panel scraping, character reference sheets, 9:16 vertical storyboards, and block prompt `.txt` generation.
+- **`manga-review-pipeline`**: Production contract reference, slash command contracts, and downstream video/flow specifications.
+
+---
+
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+---
+
+## 📄 License
+
+MIT
