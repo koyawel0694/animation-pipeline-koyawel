@@ -40,6 +40,27 @@ HEADERS = {
 }
 
 
+def write_json_atomic(path: Path, payload: dict) -> None:
+    """Write metadata as one complete file so interruption cannot corrupt it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    temp.replace(path)
+
+
+def cleanup_managed_page_files(images_dir: Path, expected_suffixes: list[str]) -> None:
+    """Remove only stale files owned by this scraper's page naming scheme."""
+    expected_count = len(expected_suffixes)
+    for path in images_dir.glob("page_*.*"):
+        match = re.fullmatch(r"page_(\d+)", path.stem)
+        if not match:
+            continue
+        index = int(match.group(1))
+        expected_suffix = expected_suffixes[index - 1].lower() if 1 <= index <= expected_count else None
+        if expected_suffix is None or path.suffix.lower() != expected_suffix:
+            path.unlink()
+
+
 def sanitize_filename(name: str) -> str:
     """Convert title string into safe directory name."""
     clean = re.sub(r"[^\w\s-]", "", name).strip().lower()
@@ -239,6 +260,10 @@ def download_chapter(chapter_info: dict, manga_meta: dict, output_dir: Path, max
         filenames = filenames[:max_pages]
 
     total_pages = len(filenames)
+    cleanup_managed_page_files(
+        images_dir,
+        [Path(fname).suffix or ".jpg" for fname in filenames],
+    )
     print(f"[PAGES] Downloading {total_pages} pages...")
 
     saved_images = []
@@ -257,7 +282,9 @@ def download_chapter(chapter_info: dict, manga_meta: dict, output_dir: Path, max
             try:
                 img_resp = requests.get(page_url, headers=HEADERS, timeout=20)
                 if img_resp.status_code == 200 and len(img_resp.content) > 1000:
-                    out_file.write_bytes(img_resp.content)
+                    temp_file = out_file.with_suffix(out_file.suffix + ".tmp")
+                    temp_file.write_bytes(img_resp.content)
+                    temp_file.replace(out_file)
                     saved_images.append(str(out_file.resolve()))
                     print(f"  [{i}/{total_pages}] Saved: {out_file.name} ({len(img_resp.content)//1024} KB)")
                     downloaded = True
@@ -270,13 +297,21 @@ def download_chapter(chapter_info: dict, manga_meta: dict, output_dir: Path, max
 
         time.sleep(0.15)
 
+    if len(saved_images) != total_pages:
+        raise RuntimeError(
+            f"Chapter {ch_num} download incomplete: saved {len(saved_images)} of {total_pages} pages"
+        )
+
     # Save chapter metadata.json
     ch_meta = {
         "title": manga_meta.get("title", "Unknown"),
+        "series_title": manga_meta.get("title", "Unknown"),
+        "series_slug": sanitize_filename(manga_meta.get("title", "Unknown")),
         "author": manga_meta.get("author", "Unknown"),
         "synopsis": manga_meta.get("synopsis", ""),
         "manga_id": manga_meta.get("id"),
         "manga_url": manga_meta.get("url"),
+        "source_url": f"https://mangadex.org/chapter/{chapter_id}",
         "chapter": {
             "id": chapter_id,
             "chapter": ch_num,
@@ -284,13 +319,14 @@ def download_chapter(chapter_info: dict, manga_meta: dict, output_dir: Path, max
             "group": chapter_info.get("group"),
         },
         "pages_count": len(saved_images),
+        "page_count": len(saved_images),
         "images": saved_images,
         "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "scraped_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
 
     meta_file = ch_dir / "metadata.json"
-    with open(meta_file, "w", encoding="utf-8") as f:
-        json.dump(ch_meta, f, indent=2, ensure_ascii=False)
+    write_json_atomic(meta_file, ch_meta)
 
     print(f"[OK] Chapter {ch_num} saved: {len(saved_images)} pages, metadata at {meta_file}")
     return ch_meta
@@ -351,7 +387,9 @@ def download_generic_images(image_urls: list[str], images_dir: Path, referer: st
             try:
                 r = requests.get(img_url, headers={**HEADERS, "Referer": referer}, timeout=30)
                 if r.status_code == 200 and len(r.content) > 1000:
-                    out_file.write_bytes(r.content)
+                    temp_file = out_file.with_suffix(out_file.suffix + ".tmp")
+                    temp_file.write_bytes(r.content)
+                    temp_file.replace(out_file)
                     saved.append(str(out_file.resolve()))
                     ok = True
                     break
@@ -402,10 +440,20 @@ def scrape_fallback_chapters(title: str, num_chapters: int, manga_output_dir: Pa
             images = images[:max_pages]
 
         ch_dir = manga_output_dir / f"ch{ch_num}"
+        cleanup_managed_page_files(
+            ch_dir / "images",
+            [Path(urlparse(image).path).suffix or ".jpg" for image in images],
+        )
         saved = download_generic_images(images, ch_dir / "images", referer=chapter_url)
+        if len(saved) != len(images):
+            raise RuntimeError(
+                f"Fallback chapter {ch_num} download incomplete: saved {len(saved)} of {len(images)} pages"
+            )
 
         ch_meta = {
             "title": title,
+            "series_title": title,
+            "series_slug": sanitize_filename(title),
             "author": "Unknown (web reader fallback)",
             "synopsis": "",
             "manga_id": None,
@@ -418,12 +466,13 @@ def scrape_fallback_chapters(title: str, num_chapters: int, manga_output_dir: Pa
             },
             "source_url": chapter_url,
             "pages_count": len(saved),
+            "page_count": len(saved),
             "images": saved,
             "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "scraped_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
         meta_file = ch_dir / "metadata.json"
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump(ch_meta, f, indent=2, ensure_ascii=False)
+        write_json_atomic(meta_file, ch_meta)
         print(f"[OK] Chapter {ch_num} saved: {len(saved)} pages -> {meta_file}")
         results.append(ch_meta)
 

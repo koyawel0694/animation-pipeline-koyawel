@@ -17,9 +17,10 @@ Use this skill to turn one manga/manhwa/manhua chapter into a verified productio
 
 1. ordered chapter panels plus source metadata;
 2. one canonical sequential chapter analysis;
-3. series-level character reference PNGs;
-4. 9:16 storyboard metadata and finished storyboard-sheet PNGs;
-5. one plain-text prompt file per storyboard block, plus combined plain-text prompt files.
+3. a canonical exact-text script ledger with stable source-scene IDs;
+4. series-level character reference PNGs;
+5. 9:16 storyboard metadata (optional storyboard-sheet PNGs only when explicitly requested);
+6. one plain-text prompt file per storyboard block, plus combined plain-text prompt files.
 
 This is an asset-preparation workflow. It does not require rendering a final TikTok video, narration audio, subtitles, or a CSV queue. Treat CSV/Flow automation as legacy compatibility only when the user explicitly asks for it.
 
@@ -102,6 +103,8 @@ python3 sequential_chapter_analysis.py \
 
 It writes chapter_analysis.json. The analysis must retain ordered page filenames, visible scenes, exact readable dialogue, speakers, emotions, actions, continuity notes, and prompt-safe camera/style observations. It saves progress so an interrupted run can resume; retry the failed page instead of restarting or merging independent analyses.
 
+After analysis, generate `chapter_script.json`, `chapter_script.txt`, and `chapter_script.md` deterministically from the saved JSON. Preserve every non-empty `dialogue_text` in page/scene order, assign stable `p###-s##` IDs, retain speaker and delivery, and mark SFX as not spoken. This ledger is the only script source for storyboard and prompt stages.
+
 Do not start downstream asset work until:
 
 ~~~text
@@ -139,7 +142,7 @@ Completion evidence:
 - every reference contains multiple consistent views rather than a single plot frame;
 - later chapters point to established refs instead of silently regenerating them.
 
-### 4. Create the storyboard metadata and image sheets
+### 4. Create the storyboard metadata and optional image sheets
 
 First create the machine-readable and human-readable storyboard:
 
@@ -149,7 +152,7 @@ python3 build_serye_storyboard.py \
   --output-dir output/<series-slug>/ch<chapter>
 ~~~
 
-Then create finished storyboard-sheet PNGs from approved clean narrative crops or a verified image-generation pass. The local compositor command is:
+Storyboard-sheet PNGs are optional and only run when explicitly requested. If requested, create them from approved clean narrative crops or a verified image-generation pass. The local compositor command is:
 
 ~~~bash
 python3 compose_chapter_storyboards.py \
@@ -169,12 +172,18 @@ The storyboard-sheet visual contract follows the supplied storyboard example:
 - the final full-width beat is an explicit held pose/freeze frame;
 - no watermark, aggregator branding, warning card, or invented unrelated text.
 
-Expected output:
+Required output:
 
 ~~~text
 storyboard_9_16.json
 storyboard_9_16.md
 storyboard_9_16.html
+chapter_script.json / .txt / .md
+~~~
+
+Optional storyboard-sheet output, when explicitly requested:
+
+~~~text
 nano_storyboards/block<nn>_<slug>.png
 storyboard_assets_manifest.json
 ~~~
@@ -211,7 +220,7 @@ Each blockN_prompts.txt contains one shot prompt per beat separated by:
 @@@NEXT@@@
 ~~~
 
-Each prompt must describe one full-bleed 9:16 shot, preserve the reference-sheet identity, carry the beat's action/camera/voice cue, and include the explicit final freeze-frame instruction on the last beat. Lead with a strict 2D manhwa/webtoon style lock and forbid comic borders, split screens, subtitles, speech bubbles, watermarks, and storyboard-inside-storyboard output.
+Each prompt must describe one full-bleed 9:16 shot, preserve the reference-sheet identity, carry the beat's action/camera/script cue, and include the explicit final freeze-frame instruction on the last beat. Both the shot prompt and continuous `blockN_video_prompt.txt` must contain the exact canonical cue for every beat. Use an explicit no-dialogue cue for silent/transition beats, mark SFX as not spoken, and never invent, paraphrase, repeat, or move dialogue. Follow the confirmed style preset and forbid comic borders, split screens, subtitles, speech bubbles, watermarks, and storyboard-inside-storyboard output.
 
 Do not make CSV the primary deliverable for this workflow. If a user explicitly requests the legacy Flow Automator CSV, generate it in addition to—not instead of—the .txt files and verify the documented schema separately.
 
@@ -246,7 +255,7 @@ Read only the reference needed for the current branch:
 
 ## Common pitfalls
 
-1. Stopping at analysis or CSV. The requested product includes character PNGs, finished storyboard PNGs, and block .txt files. Check every required output path.
+1. Stopping at analysis or CSV. The requested product includes the canonical script ledger and verified block .txt files; storyboard PNG sheets are optional. Check every required output path.
 2. Parallel page readers. Use one sequential reader; parallelize only downstream transformations after canonical JSON is complete.
 3. Regenerating known characters. Reuse the series reference directory and write provenance.
 4. Uploading a storyboard collage. The collage contains borders, timestamps, and multiple shots; use a clean crop or model sheet as an ingredient.
@@ -254,16 +263,18 @@ Read only the reference needed for the current branch:
 6. Hardcoded chapter prompts. Build prompt text from the active chapter's storyboard JSON; never reuse the Investor example's block names or page numbers for another title.
 7. Claiming a generated image exists. Inspect dimensions and open the file before reporting it.
 8. Language drift. Keep prompt, VO, and labels in English by default; only switch languages on explicit request.
+9. Script drift. Treat `chapter_script.json` as canonical, validate its source hash, and reject prompts whose script cue or source-scene ID does not match the saved analysis.
 
 ## Verification checklist
 
 - [ ] Source URL, title, chapter, page count, and provenance are recorded.
 - [ ] Every downloaded panel exists, opens, and is in the expected order.
 - [ ] chapter_analysis.json parses and has complete contiguous page coverage.
+- [ ] chapter_script.json, chapter_script.txt, and chapter_script.md preserve every non-empty source text entry with stable IDs.
 - [ ] character_refs/ contains the required PNG identity sheets and character_refs_source.json.
 - [ ] storyboard_9_16.json, .md, and .html exist and agree on block/beat counts.
-- [ ] Every nano_storyboards/*.png is vertical 9:16, uses the 2+1+2+2+1 layout, and has the six timing labels plus final freeze frame.
 - [ ] flow_queue/blockN_prompts.txt exists for every block, contains the @@@NEXT@@@ delimiter between shots, and contains no CSV-only substitution.
+- [ ] Every continuous block prompt contains the exact canonical script cue for each beat; SFX is not spoken and transitions contain no dialogue.
 - [ ] Combined TXT files and prompt_txt_manifest.json report the same block and shot counts as the storyboard JSON.
 - [ ] verify_manga_chapter_assets.py exits successfully for the completed chapter.
 - [ ] No storyboard collage, scanlation insert, watermark, or promotional card is being used as a video ingredient.

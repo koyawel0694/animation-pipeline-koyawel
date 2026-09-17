@@ -2,27 +2,42 @@
 """Generate Nano Banana Pro character sheets and SERYE storyboard sheets through agy."""
 import argparse
 import json
+import os
 import subprocess
+import sys
 import time
 import re
 from pathlib import Path
 
-AGY = "/home/john/.local/bin/agy"
+from PIL import Image
+
+AGY = os.environ.get("AGY_BIN", "/home/john/.local/bin/agy")
 STYLE_CONFIG_PATH = Path(__file__).with_name("style_presets.json")
 
 
 def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple[str, dict]:
-    """Load explicit preset, or chapter's style_selection.json, or default."""
+    """Load an explicit, confirmed preset; never silently fall back."""
     if not STYLE_CONFIG_PATH.exists():
-        return "webtoon_2d", {}
+        raise FileNotFoundError(f"Missing style preset configuration: {STYLE_CONFIG_PATH}")
     config = json.loads(STYLE_CONFIG_PATH.read_text(encoding="utf-8"))
     selection = chapter_dir / "style_selection.json"
     selected = requested
     if not selected and selection.exists():
         try:
-            selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
-        except Exception:
-            pass
+            selection_data = json.loads(selection.read_text(encoding="utf-8"))
+            selected = selection_data.get("default_preset")
+            confirmed = selection_data.get("selected_by_user") is True or selection_data.get("selection_method") in {
+                "cli_override",
+                "interactive",
+                "clarify",
+            }
+            if not confirmed:
+                raise RuntimeError(
+                    f"Style selection in {selection} is provisional. Ask the user to choose a style "
+                    "or pass --style-preset explicitly before generating assets."
+                )
+        except (OSError, json.JSONDecodeError, TypeError):
+            selected = None
     presets = config.get("presets", {})
     if not selected:
         available = ", ".join(sorted(presets))
@@ -87,32 +102,48 @@ def validate_reference_dir(reference_dir: Path):
     refs = sorted(reference_dir.glob("*.png"))
     if not refs:
         raise FileNotFoundError(f"No character reference PNGs found in {reference_dir}")
+    for path in refs:
+        try:
+            with Image.open(path) as image:
+                if image.size != (768, 1376):
+                    raise ValueError(f"reference must be 768x1376, got {image.size}")
+                image.verify()
+        except Exception as exc:
+            raise ValueError(f"Invalid character reference {path}: {exc}") from exc
     return refs
 
 
-def copy_reference_manifest(reference_dir: Path, chapter_dir: Path):
-    """Record reused refs without duplicating or regenerating PNGs."""
+def write_reference_manifest(
+    reference_dir: Path,
+    chapter_dir: Path,
+    reused: bool,
+    style_preset: str,
+) -> Path:
+    """Record the exact reference origin for both new and reused refs."""
     manifest = chapter_dir / "character_refs_source.json"
+    metadata = {}
+    metadata_path = chapter_dir / "metadata.json"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     manifest.write_text(json.dumps({
-        "source_dir": str(reference_dir),
-        "files": [str(path) for path in validate_reference_dir(reference_dir)],
-        "reused": True,
-    }, indent=2), encoding="utf-8")
+        "source_dir": str(reference_dir.resolve()),
+        "files": [str(path.resolve()) for path in validate_reference_dir(reference_dir)],
+        "reused": reused,
+        "series": metadata.get("series_slug") or metadata.get("title"),
+        "chapter": str((metadata.get("chapter") or {}).get("chapter", metadata.get("chapter", "")))
+        if isinstance(metadata.get("chapter"), dict) else str(metadata.get("chapter", "")),
+        "style_preset_at_generation": style_preset,
+        "status": "reused_canonical_refs" if reused else "canonical_character_refs",
+    }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return manifest
 
 
-CHARACTERS = [
-    ("kang_jin_hoo", "KANG JIN-HOO", "23-year-old Korean man, recently discharged military veteran, lean athletic build, fair skin, short tousled black hair with textured bangs, sharp tired intelligent dark eyes, defined jawline, restrained understated expression. Wardrobe anchor: cream long-sleeve crewneck shirt, dark indigo jeans, white low-top sneakers. Include front full-body, 3/4 portrait, side profile, seated casual pose."),
-    ("oh_taek_gyu", "OH TAEK-GYU", "23-year-old Korean man, stocky build, round friendly face, short dark hair, thick black-rimmed glasses, expressive eyebrows, casual energetic personality. Wardrobe anchor: gray zip-up hoodie over white T-shirt, dark casual trousers, sneakers. Include front full-body, 3/4 portrait, side profile, seated pose holding a small device or game collectible."),
-    ("street_reporter", "STREET REPORTER", "Young Korean male television street reporter, slim build, neat side-parted black hair, sharp friendly face, expressive dark eyes. Wardrobe anchor: tailored charcoal-gray suit, crisp white shirt, black tie, handheld blue broadcast microphone. Include front full-body, 3/4 portrait, side profile, microphone pose."),
-    ("shin_yuri", "SHIN YURI", "Young Korean woman, elegant and confident, long wavy honey-blonde hair, warm expressive eyes, fair skin, charming intelligent smile. Wardrobe anchor: refined beige blouse, simple crossbody strap, understated professional styling. Include front full-body, 3/4 portrait, side profile, interview pose."),
-    ("female_interviewer", "FEMALE INTERVIEWER", "Young Korean woman, poised professional broadcast interviewer, neatly styled dark chin-length bob, refined facial features, calm inquisitive eyes. Wardrobe anchor: tailored navy blue blazer, dark blouse, interview cue cards. Include front full-body, 3/4 portrait, side profile, seated interview pose."),
-    ("spirit_shaman", "SPIRIT SHAMAN AND FLAMING EAGLE", "Supernatural Korean shamanic spirit with an aged expressive face, ornate traditional ceremonial headdress, layered green and gold ritual robes, pale glowing eyes, surrounded by controlled emerald mist. Include a separate flaming eagle manifestation: realistic bald eagle with outstretched wings, radiant golden-pink flame aura, physically detailed feathers. Clearly separate human spirit and eagle forms in one reference sheet."),
-]
-
+def copy_reference_manifest(reference_dir: Path, chapter_dir: Path, style_preset: str = ""):
+    """Record reused refs without duplicating or regenerating PNGs."""
+    return write_reference_manifest(reference_dir, chapter_dir, reused=True, style_preset=style_preset)
 
 def load_characters(chapter_dir: Path, characters_file: Path | None = None) -> list[tuple[str, str, str]]:
-    """Load character definitions from characters.json if present, or fallback to default."""
+    """Load chapter- or series-specific character definitions from characters.json."""
     paths_to_check = []
     if characters_file:
         paths_to_check.append(characters_file)
@@ -135,17 +166,10 @@ def load_characters(chapter_dir: Path, characters_file: Path | None = None) -> l
                     return result
             except Exception as e:
                 print(f"[WARN] Failed to parse {p}: {e}", file=sys.stderr)
-    return CHARACTERS
-
-BLOCKS = [
-    ("block01_the_question", "Block 1 — The Question That Changes Everything", ["page_001.webp", "page_002.webp"], ["Street Interview Opening", "The Hundred Million Won Question", "The Slothful Dream", "The Ultimate Hypothetical Question", "The Final Question", "The Realistic Inquiry"]),
-    ("block02_the_richest_man", "Block 2 — The Man Who Became Richest", ["page_003.webp", "page_004.webp", "page_005.webp"], ["Interview with the World's Richest Person", "Rumors of Clairvoyance", "Casual Denial", "Sudden Activation of the Golden Eye", "Apparition in the Studio", "Golden Gaze and Smirk"]),
-    ("block03_before_the_fortune", "Block 3 — Before the Fortune", ["page_006.webp", "page_007.webp", "page_008.webp", "page_009.webp", "page_010.webp"], ["Waking Up Groggy", "The Discharge Cap", "The Semi-Basement Apartment", "Remnants of Family Prosperity", "Introducing Oh Taek-Gyu", "The Bantcoin Encryption Key"]),
-    ("block04_thirteen_billion", "Block 4 — Thirteen Point Five Billion Won", ["page_010.webp", "page_011.webp", "page_012.webp", "page_013.webp", "page_014.webp"], ["The Price Quote", "The Unit Clarification", "The Staggering Reality", "13.5 Billion Won", "Shameless Request", "The Spark of Memory"]),
-    ("block05_warning_tomorrow", "Block 5 — The Warning From Tomorrow", ["page_015.webp", "page_016.webp", "page_017.webp", "page_018.webp"], ["Aura of the Flaming Eagle", "Recurrence of the Vision", "Fiery Inscription", "Inquiring About Mountainhill", "The Fiery Warning", "Sell All Your Bantcoin"]),
-    ("block06_future_real", "Block 6 — The Future Is Real", ["page_019.webp", "page_020.webp", "page_021.webp", "page_022.webp", "page_023.webp"], ["Taek-Gyu Agrees to Liquidate", "Server Down", "The Empty Accounts Revelation", "Community Panic and Uproar", "The Revelation", "Website Promotional End Card"]),
-]
-
+    raise RuntimeError(
+        f"No chapter-specific characters.json found for {chapter_dir}. "
+        "Refusing to guess character identities; provide canonical character definitions before generation."
+    )
 
 def run(prompt, timeout=900):
     result = subprocess.run([AGY, "--model", "gemini-3.8-flash-medium", "--effort", "medium", "--print-timeout", "15m", "-p", prompt], capture_output=True, text=True, timeout=timeout)
@@ -251,8 +275,6 @@ def main():
     ap.add_argument("--characters-file", type=Path, default=None, help="Path to characters.json definition file")
     args = ap.parse_args()
     base, ref_dir, sb_dir = chapter_paths(args.chapter_dir.resolve(), args.reference_dir)
-    if args.reference_dir:
-        copy_reference_manifest(ref_dir, base)
     ref_dir.mkdir(parents=True, exist_ok=True)
     sb_dir.mkdir(parents=True, exist_ok=True)
     if not (args.characters or args.storyboards or args.all):
@@ -266,8 +288,10 @@ def main():
         selection_path.write_text(json.dumps({
             "default_preset": selected_style,
             "label": profile.get("label", ""),
+            "selected_by_user": True,
+            "selection_method": "cli_override" if args.style_preset else "interactive",
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        }, indent=2), encoding="utf-8")
+        }, indent=2) + "\n", encoding="utf-8")
 
     metadata = {}
     metadata_path = base / "metadata.json"
@@ -281,16 +305,27 @@ def main():
             out = ref_dir / f"{slug}_ref.png"
             print(f"[CHARACTER] {name} -> {out} [{selected_style}]", flush=True)
             run(make_character_prompt(name, details, out, profile))
+            validate_reference_dir(ref_dir)
             print("[OK]", flush=True)
+        write_reference_manifest(ref_dir, base, reused=False, style_preset=selected_style)
     elif args.reference_dir:
         print(f"[CHARACTER] Reusing existing refs from {ref_dir}", flush=True)
         validate_reference_dir(ref_dir)
+        write_reference_manifest(ref_dir, base, reused=True, style_preset=selected_style)
 
     if args.storyboards or args.all:
+        validate_reference_dir(ref_dir)
         for slug, title, pages, labels in build_block_specs(base):
             out = sb_dir / f"{slug}.png"
             print(f"[STORYBOARD] {title} -> {out} [{selected_style}]", flush=True)
             run(make_storyboard_prompt(title, pages, labels, out, base, ref_dir, manga_title, profile))
+            try:
+                with Image.open(out) as image:
+                    if image.size != (768, 1376):
+                        raise ValueError(f"storyboard must be 768x1376, got {image.size}")
+                    image.verify()
+            except Exception as exc:
+                raise RuntimeError(f"Generated storyboard is invalid: {out}: {exc}") from exc
             print("[OK]", flush=True)
 
 if __name__ == "__main__":

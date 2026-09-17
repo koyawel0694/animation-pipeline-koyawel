@@ -24,16 +24,18 @@ This repository contains the complete pipeline toolset (formerly `manga-video-pi
   └─ Exports: output/<slug>/ch<num>/chapter_analysis.json
                │
                ▼
-[Stage 3: Character References & Model Sheets]
+[Stage 3: Canonical Script & Character References]
+  ├─ Exact source-text ledger: chapter_script.json/.txt/.md
   ├─ 9:16 Model Sheets on neutral studio backdrops (768x1376)
   ├─ Front full-body, 3/4 portrait, side profile, and action pose
   └─ Output: output/<slug>/ch<num>/character_refs/
                │
                ▼
 [Stage 4: 9:16 Vertical Storyboards]
-  ├─ 10-Second SERYE Drama Storyboard Blocks (5 rows: 2+1+2+2+1 = 8 shots)
+  ├─ 10-Second SERYE Drama Storyboard Blocks (6 exact timestamped beats)
+  ├─ Stable source-scene IDs, non-overlapping block pools, explicit transitions
   ├─ 6 timestamped beats per block ending on freeze frame
-  └─ Output: output/<slug>/ch<num>/nano_storyboards/
+  └─ Output: output/<slug>/ch<num>/storyboard_9_16.json/.md/.html
                │
                ▼
 [Stage 5: Block Prompts (.txt format with @@@NEXT@@@)]
@@ -67,7 +69,7 @@ python3 build_block_prompts_txt.py \
   --style-preset photorealistic_live_action
 ```
 
-If a chapter contains `style_selection.json`, the exporter uses its `default_preset`. Otherwise it defaults to `webtoon_2d`.
+The exporter requires an explicit `--style-preset` or a confirmed `style_selection.json`; it never silently defaults to a visual style.
 
 ---
 
@@ -92,10 +94,9 @@ python3 manga_source_scraper.py --url "<MANGA_URL>" --output-dir output/<slug>/c
 python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch1
 ```
 
-### 3. Generate Storyboard Metadata & Sheets
+### 3. Generate Storyboard Metadata
 ```bash
 python3 build_serye_storyboard.py --analysis output/<slug>/ch1/chapter_analysis.json --output-dir output/<slug>/ch1
-python3 compose_chapter_storyboards.py --chapter-dir output/<slug>/ch1 --reference-dir output/<slug>/ch1/character_refs
 ```
 
 ### 4. Build Block Prompts in Plain .txt Format
@@ -105,7 +106,7 @@ python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch1 --style-prese
 
 ### 5. Verify Chapter Production Assets
 ```bash
-python3 verify_manga_chapter_assets.py output/<slug>/ch1
+python3 verify_manga_chapter_assets.py --chapter-dir output/<slug>/ch1
 ```
 
 ---

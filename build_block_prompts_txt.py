@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 import re
 
+from chapter_contract import script_cue
+
 
 DELIMITER = "\n\n@@@NEXT@@@\n\n"
 STYLE_CONFIG_PATH = Path(__file__).with_name("style_presets.json")
@@ -41,8 +43,19 @@ def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple
     selected = requested
     if not selected and selection and selection.exists():
         try:
-            selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
-        except Exception:
+            selection_data = json.loads(selection.read_text(encoding="utf-8"))
+            selected = selection_data.get("default_preset")
+            confirmed = selection_data.get("selected_by_user") is True or selection_data.get("selection_method") in {
+                "cli_override",
+                "interactive",
+                "clarify",
+            }
+            if not confirmed:
+                raise RuntimeError(
+                    f"Style selection in {selection} is provisional. Ask the user to choose a style "
+                    "or pass --style-preset explicitly before generating prompts."
+                )
+        except (OSError, json.JSONDecodeError, TypeError):
             selected = None
     presets = config.get("presets") or {}
     if not selected:
@@ -109,11 +122,11 @@ def format_shot_prompt(
         f"Series: {text(title)}.",
         header,
         f"Create one continuous full-bleed shot for the beat labelled {text(beat.get('label'))}.",
+        f"Canonical source scene: {text(beat.get('source_scene_id'))} — {text(beat.get('scene_title'))}.",
         f"Action and composition: {text(beat.get('action'))}",
         f"Camera movement: {text(beat.get('camera'))}",
+        script_cue(beat),
     ]
-    if beat.get("vo"):
-        lines.append(f"English dialogue or voiceover cue: {text(beat.get('vo'))}")
     if beat.get("sfx"):
         lines.append(f"Sound design suggestion: {text(beat.get('sfx'))}")
     if beat.get("page_file"):
@@ -141,7 +154,9 @@ def format_continuous_prompt(
     for index, beat in enumerate(beats, 1):
         beat_lines.append(
             f"Beat {index} ({text(beat.get('timestamp'))}) — {text(beat.get('label'))}: "
-            f"{text(beat.get('action'))} Camera: {text(beat.get('camera'))}."
+            f"Canonical source scene {text(beat.get('source_scene_id'))} ({text(beat.get('scene_title'))}). "
+            f"{text(beat.get('action'))} Camera: {text(beat.get('camera'))}. "
+            f"{script_cue(beat)}"
         )
     block_target = (
         episode_context
@@ -153,6 +168,7 @@ def format_continuous_prompt(
         f"Series: {text(title)}.",
         f"Create one coherent 10-second vertical drama block, {block_target}.",
         "Maintain exact character identity, wardrobe, setting continuity, and chronological action across the beats.",
+        "Use only the exact manga script cues below. Do not invent, paraphrase, repeat, or move dialogue between beats.",
         *beat_lines,
         "Use the final beat as a complete freeze frame; do not add a new action after the final pose.",
     ])
@@ -160,6 +176,24 @@ def format_continuous_prompt(
 
 def write_delimited(path: Path, prompts: list[str]) -> None:
     path.write_text(DELIMITER.join(prompt.strip() for prompt in prompts) + "\n", encoding="utf-8")
+
+
+def clean_managed_prompt_files(output_dir: Path) -> None:
+    """Remove only files owned by this exporter before a deterministic rebuild."""
+    patterns = (
+        "block*_prompts.txt",
+        "block*_video_prompt.txt",
+        "ep??_block*_prompts.txt",
+        "ep??_block*_video_prompt.txt",
+        "ep??_flow_6_continuous_blocks.txt",
+        "flow_*_continuous_blocks.txt",
+        "flow_all_*_shots.txt",
+        "prompt_txt_manifest.json",
+    )
+    for pattern in patterns:
+        for path in output_dir.glob(pattern):
+            if path.is_file():
+                path.unlink()
 
 
 def main() -> None:
@@ -172,8 +206,14 @@ def main() -> None:
     chapter_dir = args.chapter_dir.resolve()
     output_dir = (args.output_dir or chapter_dir / "flow_queue").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    script_path = chapter_dir / "chapter_script.json"
+    if not script_path.exists():
+        raise FileNotFoundError(
+            f"Missing canonical chapter script: {script_path}; run build_serye_storyboard.py first"
+        )
     style_id, profile = load_style_profile(chapter_dir, args.style_preset)
     data, blocks = load_storyboard(chapter_dir)
+    clean_managed_prompt_files(output_dir)
     title = (
         data.get("title")
         or (
@@ -194,6 +234,7 @@ def main() -> None:
         "chapter_dir": str(chapter_dir),
         "format": "plain-text-prompts",
         "style_preset": style_id,
+        "script_artifact": str((chapter_dir / "chapter_script.json").resolve()) if (chapter_dir / "chapter_script.json").exists() else None,
         "pacing_mode": data.get("pacing_mode", "single_episode"),
         "total_episodes": data.get("total_episodes", 1),
         "blocks": [],
@@ -203,6 +244,12 @@ def main() -> None:
     episode_prompts: dict[int, list[str]] = {}
     episode_continuous: dict[int, list[str]] = {}
     episode_manifests: dict[int, dict] = {}
+    if has_episodes:
+        for episode in data.get("episodes") or []:
+            ep_num = episode.get("episode_number", 1)
+            ep_dir = chapter_dir / "episodes" / f"ep{ep_num:02d}" / "flow_queue"
+            ep_dir.mkdir(parents=True, exist_ok=True)
+            clean_managed_prompt_files(ep_dir)
 
     for block_number, block in enumerate(blocks, 1):
         ep_num = block.get("episode_number", 1)
@@ -264,6 +311,7 @@ def main() -> None:
                     "episode_number": ep_num,
                     "format": "plain-text-prompts",
                     "style_preset": style_id,
+                    "script_artifact": str((chapter_dir / "episodes" / f"ep{ep_num:02d}" / "chapter_script.json").resolve()),
                     "total_blocks": 0,
                     "total_shots": 0,
                     "blocks": [],

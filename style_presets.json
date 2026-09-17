@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "description": "Art style and animation presets for character reference generation, storyboards, and video prompt export.",
-  "default_for_unconfigured_chapters": "webtoon_2d",
+  "default_for_unconfigured_chapters": null,
   "presets": {
     "photorealistic_live_action": {
       "label": "Cinematic Photorealistic Live-Action",

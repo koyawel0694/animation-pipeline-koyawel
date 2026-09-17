@@ -14,10 +14,10 @@ End-to-End Production Pipeline:
       - Exports canonical `chapter_analysis.json`
       ↓
   [Stage 3: Downstream Video & Storyboard Specialization]
-      ├─ Subagent 1 & 2: Scene-level dialogue script + video prompts -> video_prompts.csv
+      ├─ Canonical chapter script ledger -> chapter_script.json/.md/.txt
       ├─ Subagent 3: 10-second SERYE Drama Storyboard Blocks (6 beats per block, timestamps, freeze frame)
       ├─ Character Ref Sheets: 9:16 multi-view model sheets via Nano Banana Pro
-      └─ Block prompt TXT package (one plain-text file per storyboard block)
+      └─ Block prompt TXT package with exact per-beat script cues
       ↓
   [Stage 4: Optional downstream video generation]
       - Use clean single-frame crops or character refs as ingredients when requested
@@ -127,7 +127,7 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
     """Prompt or resolve art style preset before generating assets."""
     config_path = SCRIPT_DIR / "style_presets.json"
     if not config_path.exists():
-        return requested_preset or "webtoon_2d"
+        raise FileNotFoundError(f"Missing style preset configuration: {config_path}")
     config = json.loads(config_path.read_text(encoding="utf-8"))
     presets = config.get("presets", {})
 
@@ -141,10 +141,21 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
         sel = chapter_dir / "style_selection.json"
         if sel.exists():
             try:
-                val = json.loads(sel.read_text()).get("default_preset")
+                selection = json.loads(sel.read_text(encoding="utf-8"))
+                val = selection.get("default_preset")
+                confirmed = selection.get("selected_by_user") is True or selection.get("selection_method") in {
+                    "cli_override",
+                    "interactive",
+                    "clarify",
+                }
+                if not confirmed:
+                    raise RuntimeError(
+                        f"Style selection in {sel} is provisional. Ask the user to choose a style "
+                        "or pass --style-preset explicitly before generating assets."
+                    )
                 if val in presets:
                     return val
-            except Exception:
+            except (OSError, json.JSONDecodeError, TypeError):
                 pass
 
     if sys.stdin and sys.stdin.isatty():
@@ -160,9 +171,7 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
                 print(f"      {desc}")
         print("=" * 60)
         try:
-            choice = input(f"Enter choice [1-{len(preset_keys)}] (default: 1): ").strip()
-            if not choice:
-                return preset_keys[0]
+            choice = input(f"Enter choice [1-{len(preset_keys)}]: ").strip()
             if choice.isdigit() and 1 <= int(choice) <= len(preset_keys):
                 return preset_keys[int(choice) - 1]
             elif choice in presets:
@@ -172,7 +181,7 @@ def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str |
 
     available = ", ".join(sorted(presets))
     raise RuntimeError(
-        f"No art/animation style preset selected and no style_selection.json found in {chapter_dir}.\n"
+        f"No confirmed art/animation style preset selected and no valid style_selection.json found in {chapter_dir}.\n"
         f"Specify --style-preset <name>. Available presets: {available}"
     )
 
@@ -208,6 +217,8 @@ def orchestrate_manga_pipeline(
     episodes: int | None = None,
     pages_per_episode: int = 22,
 ) -> list[Path]:
+    if stage == "prompts":
+        stage = "flow"
     base_out = Path(output_base or (SCRIPT_DIR / "output")).resolve()
     base_out.mkdir(parents=True, exist_ok=True)
     python_bin = sys.executable
@@ -249,21 +260,28 @@ def orchestrate_manga_pipeline(
         print_banner(f"PROCESSING CHAPTER: {ch_dir.name}")
         ch_dir = ch_dir.resolve()
 
-        # Step 0: Resolve Art Style Preset before any generation
-        active_style = choose_style_preset(ch_dir, requested_preset=style_preset)
-        selection_path = ch_dir / "style_selection.json"
-        if style_preset or not selection_path.exists():
-            config_path = SCRIPT_DIR / "style_presets.json"
-            preset_label = active_style
-            if config_path.exists():
-                presets = json.loads(config_path.read_text(encoding="utf-8")).get("presets") or {}
-                preset_label = presets.get(active_style, {}).get("label", active_style)
-            selection_path.write_text(json.dumps({
-                "default_preset": active_style,
-                "label": preset_label,
-                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            }, indent=2), encoding="utf-8")
-        print(f"[STYLE] Active art style preset: {active_style}\n")
+        # Step 0: Resolve Art Style Preset only for stages that create visual assets.
+        # Scrape, analyze, storyboard metadata, and verify remain usable without
+        # inventing a style choice or mutating chapter state.
+        style_stages = {"all", "characters", "refs", "flow", "storyboard-sheets", "visuals"}
+        active_style = None
+        if stage in style_stages:
+            active_style = choose_style_preset(ch_dir, requested_preset=style_preset)
+            selection_path = ch_dir / "style_selection.json"
+            if style_preset or not selection_path.exists():
+                config_path = SCRIPT_DIR / "style_presets.json"
+                preset_label = active_style
+                if config_path.exists():
+                    presets = json.loads(config_path.read_text(encoding="utf-8")).get("presets") or {}
+                    preset_label = presets.get(active_style, {}).get("label", active_style)
+                selection_path.write_text(json.dumps({
+                    "default_preset": active_style,
+                    "label": preset_label,
+                    "selected_by_user": True,
+                    "selection_method": "cli_override" if style_preset else "interactive",
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                }, indent=2) + "\n", encoding="utf-8")
+            print(f"[STYLE] Active art style preset: {active_style}\n")
 
         # Stage: Canonical Sequential Image Analysis
         if stage in ("all", "analyze"):
@@ -272,16 +290,6 @@ def orchestrate_manga_pipeline(
             run_command(
                 [python_bin, str(analysis_script), "--chapter-dir", str(ch_dir)],
                 label="Sequential Canonical Analysis (agy --effort medium)",
-            )
-
-        # Stage: Scene-Level Prompts & Dialogue CSV
-        if stage in ("all", "prompts"):
-            print_banner("STAGE 3A: SCENE PROMPTS & DIALOGUE EXTRACTION")
-            prompts_script = SCRIPT_DIR / "script_and_prompt_engine.py"
-            csv_path = ch_dir / "video_prompts.csv"
-            run_command(
-                [python_bin, str(prompts_script), "--chapter-dir", str(ch_dir), "--output-csv", str(csv_path)],
-                label="Subagent 1 & 2 Scene Engine",
             )
 
         # Stage: 10-Second SERYE Drama Storyboard Blocks (Episodic)
@@ -319,11 +327,9 @@ def orchestrate_manga_pipeline(
             print_banner("STAGE 3C-OPT: STORYBOARD PNG SHEETS")
             storyboard_json = ch_dir / "storyboard_9_16.json"
             if storyboard_json.exists():
-                refs = resolve_character_reference_dir(ch_dir)
-                run_command(
-                    storyboard_asset_command(ch_dir, python_bin, refs),
-                    label="Character-Referenced Storyboard Sheet Composer",
-                )
+                run_storyboard_assets(ch_dir, python_bin, style_preset=active_style)
+            else:
+                print(f"[WARN] Missing {storyboard_json}; skipping storyboard sheet composition.")
 
         # Stage: plain-text block prompts
         if stage in ("all", "flow"):
@@ -334,19 +340,35 @@ def orchestrate_manga_pipeline(
                 label="Chapter Block Prompt TXT Exporter",
             )
 
-        # Print Final Deliverables Summary for Chapter
-        print_banner("CHAPTER PRODUCTION DELIVERABLES READY")
-        print(f"Target Directory: {ch_dir}\n")
-        print("Key Artifacts Generated:")
-        print(f"1. Canonical Story Analysis:     {ch_dir / 'chapter_analysis.json'}")
-        print(f"2. Scene-Level Video Prompts:    {ch_dir / 'video_prompts.csv'}")
-        print(f"3. SERYE 10s Storyboard Markdown: {ch_dir / 'storyboard_9_16.md'}")
-        print(f"4. SERYE 10s Storyboard HTML:     {ch_dir / 'storyboard_9_16.html'}")
-        print(f"5. Character Reference Sheets:   {ch_dir / 'character_refs'}")
-        print(f"6. Block Prompt TXT Files:       {ch_dir / 'flow_queue'}")
-        print("-" * 68)
+        # Stage: production contract verification
+        if stage in ("all", "flow", "verify"):
+            print_banner("STAGE 6: VERIFY PRODUCTION ASSET CONTRACT")
+            verifier = SCRIPT_DIR / "verify_manga_chapter_assets.py"
+            run_command(
+                [python_bin, str(verifier), "--chapter-dir", str(ch_dir)],
+                label="Chapter Production Asset Verification",
+            )
 
-    print_banner("PIPELINE COMPLETE — CHAPTER ASSET PACK READY")
+        # Print Final Deliverables Summary for Chapter
+        if stage == "all" or stage == "flow":
+            print_banner("CHAPTER PRODUCTION DELIVERABLES READY")
+            print(f"Target Directory: {ch_dir}\n")
+            print("Key Artifacts Generated:")
+            print(f"1. Canonical Story Analysis:     {ch_dir / 'chapter_analysis.json'}")
+            print(f"2. Canonical Manga Script:        {ch_dir / 'chapter_script.json'}")
+            print(f"3. SERYE 10s Storyboard Markdown: {ch_dir / 'storyboard_9_16.md'}")
+            print(f"4. SERYE 10s Storyboard HTML:     {ch_dir / 'storyboard_9_16.html'}")
+            print(f"5. Character Reference Sheets:   {ch_dir / 'character_refs'}")
+            print(f"6. Block Prompt TXT Files:       {ch_dir / 'flow_queue'}")
+            print("-" * 68)
+        else:
+            print(f"[OK] Stage '{stage}' completed for {ch_dir}; run --stage all after prerequisites for the full verified asset pack.")
+
+    print_banner(
+        "PIPELINE COMPLETE — CHAPTER ASSET PACK READY"
+        if stage in ("all", "flow")
+        else f"STAGE COMPLETE — {stage.upper()}"
+    )
     return target_chapter_dirs
 
 
@@ -357,7 +379,7 @@ def main():
     parser.add_argument("--chapters", "-c", type=int, default=None, help="How many chapters to scrape")
     parser.add_argument("--max-pages", "-m", type=int, default=None, help="Max pages per chapter")
     parser.add_argument("--existing-dir", "-e", default=None, help="Process an existing chapter directory")
-    parser.add_argument("--stage", default="all", choices=["all", "scrape", "analyze", "prompts", "storyboard", "visuals", "flow"], help="Run specific pipeline stage")
+    parser.add_argument("--stage", default="all", choices=["all", "scrape", "analyze", "prompts", "storyboard", "storyboard-sheets", "visuals", "characters", "refs", "flow", "verify"], help="Run specific pipeline stage (prompts is a deprecated alias for flow)")
     parser.add_argument("--output-base", "-o", default=None, help="Output base directory (defaults to ./output)")
     parser.add_argument("--style-preset", "-s", default=None, help="Art style preset (e.g. photorealistic_live_action, studio_ghibli, webtoon_2d, etc.)")
     parser.add_argument("--episodes", type=int, default=None, help="Override number of 60s episodes for long chapters")
@@ -365,6 +387,9 @@ def main():
     args = parser.parse_args()
 
     target = args.url or args.title
+    if args.stage == "prompts":
+        print("[WARN] --stage prompts is deprecated; running the canonical plain-text flow stage.")
+        args.stage = "flow"
     orchestrate_manga_pipeline(
         title_or_url=target,
         num_chapters=args.chapters,

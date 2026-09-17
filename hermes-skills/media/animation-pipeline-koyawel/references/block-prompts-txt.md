@@ -17,6 +17,7 @@ Files produced in each `flow_queue/`:
 - `flow_6_continuous_blocks.txt`: Sequence of all continuous blocks for the episode separated by `@@@NEXT@@@`.
 - `flow_all_36_shots.txt`: Flat concatenation of all individual shot prompts across the episode.
 - `prompt_txt_manifest.json`: Machine-readable index of prompt files, shot counts, and active style preset.
+- `chapter_script.json` (at the chapter root and episode root): Canonical exact-text ledger used to verify every script cue.
 
 **NO CSV FILES REQUIRED**: Plain `.txt` files with `@@@NEXT@@@` delimiters are the required format.
 
@@ -24,7 +25,7 @@ Files produced in each `flow_queue/`:
 Each file contains 6 distinct shot prompts (one for each timing beat) separated by `\n\n@@@NEXT@@@\n\n`.
 
 ### Prompt Structure (Style Preset Adaptive)
-Each shot prompt follows an exact 8-part specification:
+Each shot prompt follows an exact 9-part specification:
 1. **Style Anchor**: Sourced from the active preset in `style_presets.json` (e.g. `photorealistic_live_action`, `webtoon_2d`, `studio_ghibli`, `anime_sakuga_2d`).
 2. **Motion Anchor**: Believable motion dynamics matching the media mode (live action camera dolly/crane or fluid 2D key poses).
 3. **Negative Anchor**: Negative constraints matching the preset (e.g. banning 2D art when in live-action mode; banning 3D CGI when in 2D mode).
@@ -32,11 +33,14 @@ Each shot prompt follows an exact 8-part specification:
 5. **Character Identity Anchor**: References the canonical character sheets in `character_refs/`.
 6. **Scene Context & Timing**: Series title, episode number (if episodic), block number, beat number, and timestamp range (`0s-1.5s`, `1.5s-3s`, etc.).
 7. **Action & Camera**: Precise action description, camera angle, and lens movement.
-8. **Dialogue / Audio Cue**: Spoken English lines with parenthesized vocal emotion tags: `(emotion, tone) Dialogue text...`.
+8. **Dialogue / Audio Cue**: Use the exact canonical cue: `MANGA SCRIPT — Speaker: ... Exact line: "..."` for spoken/narrated text, `MANGA SOUND EFFECT (not spoken): ...` for SFX, or the explicit no-dialogue cue for silent beats.
+9. **Source Identity**: Include the stable `p###-s##` scene ID so the prompt can be audited back to `chapter_analysis.json` and `chapter_script.json`.
 
 ## 3. Freeze Frame Directive
 Beat 6 of every block must end with the mandatory freeze-frame directive:
 `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
+
+Continuous prompts (`blockN_video_prompt.txt`) must include the same exact cue for every beat, in beat order. They must explicitly instruct the video model not to invent, paraphrase, repeat, or move dialogue. A visual transition may reuse an anchor frame only when its cue says that there is no spoken dialogue.
 
 ## 4. Multi-Part Episodic Prompts (Copy-Paste Ready)
 When a chapter has > 25 pages, `build_serye_storyboard.py` segments the chapter into 60-second episodes (`ep01`, `ep02`, etc.):

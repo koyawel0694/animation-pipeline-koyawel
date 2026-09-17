@@ -33,7 +33,13 @@ class StylePresetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             chapter = Path(tmp)
             (chapter / "style_selection.json").write_text(
-                json.dumps({"default_preset": "photorealistic_live_action"})
+                json.dumps(
+                    {
+                        "default_preset": "photorealistic_live_action",
+                        "selected_by_user": True,
+                        "selection_method": "interactive",
+                    }
+                )
             )
             selected, profile = load_style_profile(chapter)
             self.assertEqual(selected, "photorealistic_live_action")

@@ -1,7 +1,7 @@
 ---
 name: animation-pipeline-koyawel
 description: "Use when running the animation-pipeline-koyawel manga/manhwa/webtoon-to-video asset pipeline."
-version: 1.3.0
+version: 1.4.0
 author: John, Hermes Agent
 license: MIT
 platforms: [linux]
@@ -16,9 +16,10 @@ metadata:
 
 Turns one scraped manga/manhwa/manhua chapter into production-ready short-form video assets:
 1. **Scraped chapter panels**: Clean, numbered narrative pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
-2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) in `character_refs/` on neutral studio backdrops (`#F4F4F4`) with front full-body, 3/4 portrait, side profile, and action pose **matching the chosen art/animation style preset** (e.g. photorealistic live-action real human actors when `photorealistic_live_action` is selected; 2D model sheets when `webtoon_2d` is selected). Never paste 2D comic panels into a live-action reference.
-3. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze-frame ending in `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. For chapters > 25 pages, automatically segmented into 60s episodes (`episodes/ep01/`, `ep02/`). Visual PNG storyboard sheet compositing (legacy `nano_storyboards/`) is omitted from default deliverables.
-4. **Block prompts in .txt format per block per episode**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/` AND in each episode folder (`episodes/epXX/flow_queue/`), formatted for direct copy-paste into Google Flow.
+2. **Canonical manga script ledger**: Exact non-empty source text in page/scene order, with stable scene IDs, speaker, delivery, text type, and source-analysis hash in `chapter_script.json`, `chapter_script.txt`, and `chapter_script.md`. Sound effects are explicitly marked as not spoken.
+3. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) in `character_refs/` on neutral studio backdrops (`#F4F4F4`) with front full-body, 3/4 portrait, side profile, and action pose **matching the chosen art/animation style preset** (e.g. photorealistic live-action real human actors when `photorealistic_live_action` is selected; 2D model sheets when `webtoon_2d` is selected). Never paste 2D comic panels into a live-action reference.
+4. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze-frame ending in `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. For chapters > 25 pages, automatically segmented into 60s episodes (`episodes/ep01/`, `ep02/`). Visual PNG storyboard sheet compositing (legacy `nano_storyboards/`) is omitted from default deliverables.
+5. **Block prompts in .txt format per block per episode**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/` AND in each episode folder (`episodes/epXX/flow_queue/`), formatted for direct copy-paste into Google Flow. Both prompt forms carry the exact canonical script cue for every beat.
 
 Visual storyboard PNG sheet generation (`nano_storyboards/` and `clean_frame_crops/`) is REMOVED from default pipeline deliverables. Video generation tools take prompt text and clean character references, not composite collage sheets. No final video rendering, no narration audio generation, no review prose, and no CSV files required.
 
@@ -49,6 +50,8 @@ output/<series-slug>/ch<chapter>/
     ...
   metadata.json
   chapter_analysis.json
+  chapter_script.json                  # exact source-text ledger; JSON is canonical
+  chapter_script.txt / .md             # human-readable script exports
   style_selection.json
   character_refs/
     <character_slug>_ref.png              # 768x1376 9:16 PNG model sheets matching style preset
@@ -59,6 +62,7 @@ output/<series-slug>/ch<chapter>/
   episodes/                               # Multi-part 60s episodic packages (when > 25 pages)
     ep01/
       storyboard_9_16.json / .md / .html
+      chapter_script.json / .txt / .md
       flow_queue/
         block1_prompts.txt                # 6 shots separated by @@@NEXT@@@ (copy-paste ready)
         block1_video_prompt.txt           # Continuous 10s master block prompt
@@ -122,6 +126,7 @@ Always analyze pages sequentially in chronological order (never parallelize visi
 python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch<N> --effort medium
 ```
 Output: `chapter_analysis.json` containing exact dialogue, parenthesized vocal emotion tags `(emotion, tone)`, scene action, camera movement, and visual FX.
+Each scene must also carry `text_type` when known (`spoken`, `narration`, `thought`, `sfx`, `caption`, or `unknown`). Preserve `dialogue_text` exactly; classify sound effects as `sfx` so they are not sent to spoken TTS. Downstream stages generate `chapter_script.json`, `.txt`, and `.md` directly from this analysis—never from a second model pass.
 
 ### Stage 3: Character Reference Model Sheets Matching Selected Style
 - For Chapter 1 (or Ch 0): Create 9:16 vertical PNG model sheets (`768x1376`) for recurring characters:
@@ -138,13 +143,14 @@ Output: `chapter_analysis.json` containing exact dialogue, parenthesized vocal e
   Writes `character_refs_source.json` pointing to Chapter 1 without duplicate files.
 
 ### Stage 4: Storyboard Narrative Blocks (storyboard_9_16.json)
-Build 10-second SERYE drama storyboard blocks (6 timing beats per block, timestamps, dialogue, ending on freeze frame):
+Build 10-second SERYE drama storyboard blocks (6 timing beats per block, timestamps, exact script references, ending on freeze frame):
 - For short chapters (<= 25 pages), 1 standard 60-second episode is generated (6 blocks = 60s total).
 - For long chapters (> 25 pages, e.g. 50-70 pages), the generator automatically segments the chapter into **multi-part 60s episodes** (~20-22 pages per episode) to prevent cramming:
 ```bash
 python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N> --pages-per-episode 22
 ```
-Output: `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`.
+- **Webtoon Scroll Strips**: When a chapter is scraped as continuous vertical webtoon scroll strips (e.g. 8-12 tall images of ~13,000px height with 60-100+ scenes), the raw image count may be <= 25, but the narrative density equals a 60-80 page chapter. Always pass explicit `--episodes N` (e.g. `--episodes 3`) or `--pages-per-episode 3` so the story is properly divided into multiple 60s viral episodes instead of being crammed into a single 60s video.
+Output: `chapter_script.json`, `chapter_script.txt`, `chapter_script.md`, `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. Blocks are partitioned chronologically with non-overlapping source pools. If a block needs visual continuity beats, they are explicitly transitional and contain no repeated script line.
 *NOTE: Visual storyboard sheet compositing (`nano_storyboards/*.png` and `clean_frame_crops/`) is REMOVED from the default pipeline. The narrative storyboard JSON feeds directly into prompt generation.*
 
 ### Stage 5: Block Prompts in .txt Format (Per Block & Per Episode)
@@ -162,7 +168,8 @@ Output:
   python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N>/episodes/ep01
   ```
 - Style lock: Follows the selected preset from Stage 0 (e.g. Photorealistic Live-Action, 2D Korean Webtoon, Studio Ghibli, etc.) via `style_presets.json`. Prompt directives use `style_anchor`, `motion_anchor`, and `negative_anchor`.
-- Dialogue: Spoken English lines with parenthesized emotion cues: `(energetic, broadcast tone) ...`
+- Script fidelity: Every shot prompt and every `blockN_video_prompt.txt` continuous prompt must include the exact beat cue from the canonical ledger. Use `MANGA SCRIPT — Speaker: ... Exact line: "..."` for spoken/narrated text, `MANGA SOUND EFFECT (not spoken): ...` for SFX, and `MANGA SCRIPT: No spoken dialogue or voiceover for this beat. Do not invent dialogue.` for silent/transition beats. Never invent, paraphrase, repeat, or move dialogue between beats.
+- Dialogue: Spoken English lines retain parenthesized emotion cues: `(energetic, broadcast tone) ...`; source text itself must not be rewritten.
 - Freeze frame: Beat 6 explicitly ends with: `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
 
 ### Stage 6: Verify Assets
@@ -171,7 +178,7 @@ Run the automated contract verifier:
 python3 verify_manga_chapter_assets.py --chapter-dir output/<slug>/ch<N>
 ```
 Must pass with exit code 0:
-`[OK] output/<slug>/ch<N>: N pages, M blocks, K beats verified` (verifies root and all episode queues).
+`[OK] output/<slug>/ch<N>: N pages, M blocks, K beats verified with L source script lines` (verifies the source hash, script identity, scene references, non-overlapping episode ranges, root prompts, continuous prompts, and all episode queues).
 
 ## Pitfalls & Core Rules
 
@@ -183,3 +190,4 @@ Must pass with exit code 0:
 6. **No Scanlation Watermarks**: Exclude all promotional inserts, scanlator credits, and aggregator logos from narrative pages.
 7. **Style Preset Fidelity**: Character references and block prompts must strictly adhere to the chosen art/animation style preset. When `photorealistic_live_action` is chosen, character references must depict real human actors with natural skin texture and physical costumes—NEVER paste 2D comic art or crops into live-action reference sheets.
 8. **Parenthesized Emotion Tags**: Dialogue emotion cues must be inside parentheses at the start of the quote `(emotion, tone) Dialogue...`.
+9. **Canonical Script Is Mandatory**: Never send a storyboard or prompt package downstream unless `chapter_script.json` matches `chapter_analysis.json` exactly. SFX is sound design, not spoken dialogue. A transition beat may reuse a visual anchor only when it has an explicit no-dialogue cue.

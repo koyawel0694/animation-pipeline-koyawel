@@ -64,6 +64,7 @@ Structure:
           "panel_location": "full-page",
           "speaker": "Street Reporter",
           "voice_emotion": "(energetic, professional broadcast tone)",
+          "text_type": "spoken",
           "dialogue_text": "I ASKED THE CITIZENS OUT ON THE STREET!",
           "action_description": "High-angle shot of a busy pedestrian street in front of a cafe. Male reporter in a grey suit holds a microphone, while a cameraman and assistant film him.",
           "story_flow": "Establishes the public perception and viral speculation surrounding the mysterious fortune.",
@@ -82,3 +83,5 @@ Structure:
 - **Verbatim transcription**: Transcribe readable dialogue, narration boxes, and thoughts exactly. Never invent text.
 - **Parenthesized emotion tags**: Tag vocal delivery inside parentheses: `(calm, restrained)`, `(shocked, trembling)`.
 - **Visual facts only**: Describe visible actions, wardrobe, expressions, and blocking without speculating on unstated facts.
+- **Text classification**: Mark readable text as `spoken`, `narration`, `thought`, `sfx`, `caption`, or `unknown` when possible. SFX such as onomatopoeia is not spoken dialogue.
+- **Canonical script ledger**: After the analysis is saved, generate `chapter_script.json`, `chapter_script.txt`, and `chapter_script.md` deterministically from it. Preserve every non-empty `dialogue_text` in page/scene order, assign stable `p###-s##` IDs, and record the source-analysis hash. Never use a second model pass to rewrite or improve the transcript.

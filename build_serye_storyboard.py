@@ -10,11 +10,24 @@ Supports automatic multi-part episodic segmentation:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
 import re
+import shutil
 from pathlib import Path
+
+from chapter_contract import (
+    build_script_entries,
+    clean_text,
+    ensure_scene_identity,
+    flatten_scenes,
+    is_placeholder_text,
+    normalize_emotion,
+    scene_text_type,
+    source_text,
+)
 
 DURATIONS = ["0s-1.5s", "1.5s-3s", "3s-4.5s", "4.5s-6s", "6s-8s", "8s-10s"]
 BEAT_LABELS = [
@@ -27,63 +40,125 @@ BEAT_LABELS = [
 ]
 
 
-def clean_text(value: object) -> str:
-    return " ".join(str(value or "").split())
-
-
 def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "block"
 
 
 def load_scenes(path: Path) -> tuple[dict, list[dict]]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    scenes = []
-    for page in data.get("pages", []):
-        for scene in page.get("scenes", []):
-            item = dict(scene)
-            item["page_number"] = page["page_number"]
-            item["page_file"] = page["page_file"]
-            item["_scene_id"] = len(scenes)
-            scenes.append(item)
+    scenes = flatten_scenes(data)
     if not scenes:
         raise ValueError(f"No scenes found in analysis file {path}")
     return data, scenes
 
 
 def select_beats(pool: list[dict], count: int = 6) -> list[dict]:
-    """Select count evenly spaced scenes, prioritizing scenes with spoken dialogue."""
+    """Select key scenes while preserving chronology and dialogue coverage."""
+    pool = ensure_scene_identity(pool)
     if len(pool) <= count:
-        return pool
-    # Pick evenly spaced chronological scenes across the pool
-    indices = [round(i * (len(pool) - 1) / (count - 1)) for i in range(count)]
-    # De-duplicate indices while keeping order
-    seen = set()
-    selected = []
-    for idx in indices:
-        if idx not in seen:
-            seen.add(idx)
-            selected.append(pool[idx])
-    # If duplicates occurred due to small pool, fill from remaining
-    if len(selected) < count:
-        for s in pool:
-            if s["_scene_id"] not in seen:
-                seen.add(s["_scene_id"])
-                selected.append(s)
-            if len(selected) == count:
-                break
-    selected.sort(key=lambda x: (x["page_number"], x["_scene_id"]))
-    return selected
+        return list(pool)
+
+    # The fixed six-beat block cannot show every scene in a dense page range.
+    # Reserve slots for readable spoken/narrated/thought text first, then fill
+    # the remaining slots by maximum chronological distance.  The complete
+    # source script is still emitted separately, so compression is explicit.
+    text_indices = [
+        index
+        for index, scene in enumerate(pool)
+        if source_text(scene.get("dialogue_text"))
+        and scene_text_type(scene) != "sfx"
+    ]
+    if len(text_indices) > count:
+        required = [
+            text_indices[round(i * (len(text_indices) - 1) / (count - 1))]
+            for i in range(count)
+        ]
+    else:
+        required = list(text_indices)
+
+    chosen = set(required)
+    if not chosen:
+        chosen.update({0, len(pool) - 1})
+    while len(chosen) < count:
+        candidates = [index for index in range(len(pool)) if index not in chosen]
+        candidate = max(
+            candidates,
+            key=lambda index: (
+                min(abs(index - selected) for selected in chosen),
+                -index,
+            ),
+        )
+        chosen.add(candidate)
+    return [pool[index] for index in sorted(chosen)]
 
 
-def beat_from(scene: dict, label: str, timestamp: str, final: bool = False, cliffhanger: bool = False) -> dict:
-    dialogue = clean_text(scene.get("dialogue_text", ""))
-    emotion = clean_text(scene.get("voice_emotion", ""))
-    if emotion and not emotion.startswith("("):
-        emotion = f"({emotion})"
-    vo = f"{emotion} {dialogue}".strip() if dialogue else "none"
-    action = clean_text(scene.get("action_description", ""))
-    camera = clean_text(scene.get("camera_movement", ""))
+def partition_contiguous(pool: list[dict], count: int = 6) -> list[list[dict]]:
+    """Partition an ordered scene list into non-overlapping block pools."""
+    return [pool[(len(pool) * i) // count : (len(pool) * (i + 1)) // count] for i in range(count)]
+
+
+def assign_beat_slots(pool: list[dict], count: int = 6) -> list[tuple[dict | None, bool]]:
+    """Map source scenes to six beats; fill gaps with non-dialogue transitions.
+
+    A transition can reuse the preceding/next visual anchor, but it is marked
+    explicitly and never repeats the source scene's script line.  This keeps a
+    10-second block visually continuous without fabricating duplicate dialogue.
+    """
+    pool = ensure_scene_identity(pool)
+    if not pool:
+        return [(None, True) for _ in range(count)]
+    if len(pool) >= count:
+        return [(scene, False) for scene in select_beats(pool, count)]
+
+    positions = [count - 1] if len(pool) == 1 else [round(i * (count - 1) / (len(pool) - 1)) for i in range(len(pool))]
+    slots: list[tuple[dict | None, bool] | None] = [None] * count
+    for position, scene in zip(positions, pool):
+        slots[position] = (scene, False)
+    for index, slot in enumerate(slots):
+        if slot is not None:
+            continue
+        nearest = min(range(len(positions)), key=lambda source_index: abs(positions[source_index] - index))
+        slots[index] = (pool[nearest], True)
+    return [slot for slot in slots if slot is not None]
+
+
+def beat_from(
+    scene: dict | None,
+    label: str,
+    timestamp: str,
+    final: bool = False,
+    cliffhanger: bool = False,
+    transitional: bool = False,
+    transition_kind: str = "reaction",
+) -> dict:
+    scene = scene or {}
+    raw_text = source_text(scene.get("dialogue_text"))
+    text_type = scene_text_type(scene) if raw_text else "none"
+    has_source_text = bool(raw_text) and not is_placeholder_text(raw_text) and text_type != "none"
+    if not has_source_text:
+        raw_text = ""
+        text_type = "none"
+    emotion = normalize_emotion(scene.get("voice_emotion"))
+    action = clean_text(scene.get("action_description", "")) or "Continue the established scene with restrained physical motion."
+    camera = clean_text(scene.get("camera_movement", "")) or "Hold a stable cinematic composition."
     sfx = clean_text(scene.get("visual_style_fx", ""))
+    if transitional:
+        raw_text = ""
+        text_type = "none"
+        has_source_text = False
+        emotion = ""
+        transition_text = {
+            "opening": "a brief establishing hold",
+            "turn": "a controlled turn or reaction",
+            "reaction": "a readable reaction hold",
+            "escalation": "a restrained tension build",
+            "reveal": "the established reveal settling into frame",
+            "cliffhanger": "the final pose settling into stillness",
+        }.get(transition_kind, "a brief reaction hold")
+        action += f" Continue the same source action into {transition_text}; no new story event and no new dialogue."
+        camera += "; preserve continuity with a restrained hold"
+
+    vo = f"{emotion} {clean_text(raw_text)}".strip() if has_source_text and text_type != "sfx" else "none"
 
     if cliffhanger:
         action += " End on a complete cliffhanger freeze frame: subject holds final dramatic pose, eyes locked, no new action."
@@ -100,12 +175,21 @@ def beat_from(scene: dict, label: str, timestamp: str, final: bool = False, clif
         "page_number": scene["page_number"],
         "page_file": scene["page_file"],
         "scene_title": clean_text(scene.get("scene_title", "")),
+        "source_scene_id": scene.get("_scene_key"),
+        "source_scene_index": scene.get("_scene_index"),
+        "speaker": clean_text(scene.get("speaker", "")),
+        "text_type": text_type,
+        "source_text": raw_text,
+        "dialogue_text": raw_text if text_type in {"spoken", "narration", "thought", "caption", "unknown"} else "",
+        "voice_emotion": emotion,
+        "script_line_id": scene.get("_scene_key") if has_source_text else None,
         "action": action,
         "camera": camera,
         "vo": vo,
         "sfx": sfx,
         "story_flow": clean_text(scene.get("story_flow", "")),
         "is_cliffhanger": cliffhanger,
+        "is_transitional": transitional,
     }
 
 
@@ -116,29 +200,26 @@ def build_episode_blocks(
     ep_number: int,
     global_block_start: int = 1,
 ) -> tuple[list[dict], str, str]:
-    """Build 6 dramatic 10s blocks for an episode (pages lo_page to hi_page)."""
+    """Build six dramatic 10-second blocks from non-overlapping scene pools."""
     blocks = []
+    scene_pools = partition_contiguous(ep_scenes, 6)
     for b_idx in range(6):
-        b_lo = lo_page + ((hi_page - lo_page + 1) * b_idx) // 6
-        b_hi = lo_page + ((hi_page - lo_page + 1) * (b_idx + 1)) // 6
-        b_scenes = [s for s in ep_scenes if b_lo <= s["page_number"] <= b_hi]
-        if not b_scenes:
-            # Fallback to slice of ep_scenes
-            chunk_size = max(1, len(ep_scenes) // 6)
-            b_scenes = ep_scenes[b_idx * chunk_size : min((b_idx + 1) * chunk_size, len(ep_scenes))]
-            if not b_scenes:
-                b_scenes = [ep_scenes[-1]]
+        b_scenes = scene_pools[b_idx]
+        if not b_scenes and ep_scenes:
+            # Very short chapters can leave an empty proportional pool.  Use a
+            # visual anchor only; all six beats remain explicitly transitional.
+            anchor = ep_scenes[min(len(ep_scenes) - 1, round((b_idx + 0.5) * len(ep_scenes) / 6))]
+            slots = [(anchor, True)] * 6
+        else:
+            slots = assign_beat_slots(b_scenes, 6)
 
-        picks = select_beats(b_scenes, 6)
-        while len(picks) < 6:
-            picks.append(picks[-1])
-
-        first_title = clean_text(picks[0].get("scene_title", "")) or f"Scene {b_idx + 1}"
-        last_title = clean_text(picks[-1].get("scene_title", "")) or f"Turn {b_idx + 1}"
+        title_scenes = [scene for scene, transitional in slots if scene and not transitional] or [scene for scene, _ in slots if scene]
+        first_title = clean_text(title_scenes[0].get("scene_title", "")) if title_scenes else f"Scene {b_idx + 1}"
+        last_title = clean_text(title_scenes[-1].get("scene_title", "")) if title_scenes else f"Turn {b_idx + 1}"
         block_title = f"{first_title} to {last_title}" if first_title != last_title else first_title
 
         beats = []
-        for beat_idx in range(6):
+        for beat_idx, (scene, transitional) in enumerate(slots):
             is_episode_cliffhanger = (b_idx == 5) and (beat_idx == 5)
             is_block_end = (beat_idx == 5)
             label = BEAT_LABELS[beat_idx]
@@ -146,9 +227,21 @@ def build_episode_blocks(
                 label = "THE CLIFFHANGER — FREEZE FRAME"
             elif is_block_end:
                 label = "THE TURN — FREEZE FRAME"
-            beats.append(beat_from(picks[beat_idx], label, DURATIONS[beat_idx], final=is_block_end, cliffhanger=is_episode_cliffhanger))
+            beats.append(
+                beat_from(
+                    scene,
+                    label,
+                    DURATIONS[beat_idx],
+                    final=is_block_end,
+                    cliffhanger=is_episode_cliffhanger,
+                    transitional=transitional,
+                    transition_kind=("cliffhanger" if is_episode_cliffhanger else label.split(" ")[-1].lower()),
+                )
+            )
 
         global_block_num = global_block_start + b_idx
+        source_scene_ids = [beat["source_scene_id"] for beat in beats if beat.get("source_scene_id")]
+        script_line_ids = [beat["script_line_id"] for beat in beats if beat.get("script_line_id") and not beat.get("is_transitional")]
         blocks.append({
             "block_number": global_block_num,
             "episode_number": ep_number,
@@ -156,7 +249,10 @@ def build_episode_blocks(
             "block_title": block_title,
             "duration_sec": 10,
             "format": "9:16 vertical",
-            "source_pages": sorted({b["page_number"] for b in beats}),
+            "source_pages": sorted({b["page_number"] for b in beats if b.get("page_number")}),
+            "source_scene_ids": source_scene_ids,
+            "script_line_ids": script_line_ids,
+            "transition_beat_count": sum(1 for beat in beats if beat.get("is_transitional")),
             "beats": beats,
         })
 
@@ -173,13 +269,20 @@ def build_storyboard(
     explicit_episodes: int | None = None,
     single_episode: bool = False,
 ) -> tuple[dict, list[dict]]:
+    if pages_per_episode <= 0:
+        raise ValueError("pages_per_episode must be greater than zero")
     total_pages = max(p["page_number"] for p in data.get("pages", []))
+    scenes = ensure_scene_identity(scenes)
+    if not scenes:
+        raise ValueError("Canonical analysis contains no scenes")
     if single_episode:
         num_episodes = 1
     elif explicit_episodes:
         num_episodes = max(1, explicit_episodes)
     else:
         num_episodes = max(1, math.ceil(total_pages / pages_per_episode))
+    if num_episodes > total_pages:
+        raise ValueError(f"Cannot create {num_episodes} episodes from only {total_pages} source pages")
 
     episodes_meta = []
     all_blocks = []
@@ -190,7 +293,7 @@ def build_storyboard(
         hi = (total_pages * ep_idx) // num_episodes
         ep_scenes = [s for s in scenes if lo <= s["page_number"] <= hi]
         if not ep_scenes:
-            ep_scenes = scenes
+            raise ValueError(f"No canonical scenes found for episode {ep_idx} pages {lo}-{hi}")
 
         ep_blocks, ep_title, ep_cliffhanger = build_episode_blocks(
             ep_scenes, lo, hi, ep_number=ep_idx, global_block_start=global_block_counter
@@ -207,9 +310,22 @@ def build_storyboard(
             "duration_sec": sum(b["duration_sec"] for b in ep_blocks),
             "blocks_count": len(ep_blocks),
             "cliffhanger": ep_cliffhanger,
+            "source_scene_count": len(ep_scenes),
+            "source_scene_ids": [scene["_scene_key"] for scene in ep_scenes],
+            "script_line_ids": [
+                entry["line_id"]
+                for entry in build_script_entries(ep_scenes)
+            ],
             "blocks": ep_blocks,
         })
 
+    script_entries = build_script_entries(scenes)
+    selected_script_line_ids = [
+        beat["script_line_id"]
+        for block in all_blocks
+        for beat in block["beats"]
+        if beat.get("script_line_id") and not beat.get("is_transitional")
+    ]
     master_story = {
         "title": data.get("title") or "Manga Series",
         "chapter": data.get("chapter") or "1",
@@ -220,6 +336,10 @@ def build_storyboard(
         "total_blocks": len(all_blocks),
         "total_duration_sec": sum(b["duration_sec"] for b in all_blocks),
         "block_duration_sec": 10,
+        "source_scene_count": len(scenes),
+        "script_line_count": len(script_entries),
+        "storyboard_script_line_count": len(set(selected_script_line_ids)),
+        "storyboard_script_line_ids": selected_script_line_ids,
         "blocks": all_blocks,
         "episodes": [
             {k: v for k, v in ep.items() if k != "blocks"} for ep in episodes_meta
@@ -347,6 +467,84 @@ def render_html(story: dict, episode: dict | None = None) -> str:
     return "\n".join(out)
 
 
+def render_script_txt(title: str, chapter: str, entries: list[dict]) -> str:
+    """Render a copy-pasteable transcript without losing source order."""
+    lines = [
+        f"# Canonical Manga Script — {title} — Chapter {chapter}",
+        "# Source text is transcribed from chapter_analysis.json in page/scene order.",
+        "# SFX entries are marked as not spoken; do not send them to TTS as dialogue.",
+        "",
+    ]
+    for index, entry in enumerate(entries, 1):
+        lines.extend([
+            f"[{index:03d}] {entry['line_id']} | page {entry['page_number']} ({entry['page_file']}) | {entry['text_type']}",
+            f"Speaker: {entry['speaker']}",
+        ])
+        if entry.get("voice_emotion"):
+            lines.append(f"Delivery: {entry['voice_emotion']}")
+        lines.extend(["Exact text:", entry["dialogue_text"], ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_script_md(title: str, chapter: str, entries: list[dict]) -> str:
+    lines = [
+        f"# Canonical Manga Script — {title} — Chapter {chapter}",
+        "",
+        "This transcript is generated from the canonical sequential page analysis. Text is kept in source order; SFX is not spoken.",
+        "",
+        "| Line | Source | Type | Speaker | Delivery | Exact text |",
+        "|---|---|---|---|---|---|",
+    ]
+    for index, entry in enumerate(entries, 1):
+        def cell(value: object) -> str:
+            return str(value or "").replace("|", "\\|").replace("\n", "<br>")
+
+        lines.append(
+            "| " + " | ".join([
+                f"{index:03d} ({entry['line_id']})",
+                f"p{entry['page_number']:03d} / {entry['page_file']}",
+                entry["text_type"],
+                cell(entry["speaker"]),
+                cell(entry.get("voice_emotion")),
+                cell(entry["dialogue_text"]),
+            ]) + " |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_script_artifacts(
+    output_dir: Path,
+    data: dict,
+    scenes: list[dict],
+    analysis_path: Path,
+    line_ids: set[str] | None = None,
+) -> dict:
+    """Write the canonical script ledger and return its manifest payload."""
+    all_entries = build_script_entries(scenes)
+    entries = [entry for entry in all_entries if line_ids is None or entry["line_id"] in line_ids]
+    payload = {
+        "title": data.get("title") or "Manga Series",
+        "chapter": data.get("chapter") or "1",
+        "format": "canonical-manga-script",
+        "source_analysis": str(analysis_path.resolve()),
+        "source_analysis_sha256": hashlib.sha256(analysis_path.read_bytes()).hexdigest(),
+        "line_count": len(entries),
+        "spoken_line_count": sum(entry["text_type"] in {"spoken", "narration", "thought", "caption", "unknown"} for entry in entries),
+        "sfx_line_count": sum(entry["text_type"] == "sfx" for entry in entries),
+        "lines": entries,
+    }
+    (output_dir / "chapter_script.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (output_dir / "chapter_script.txt").write_text(
+        render_script_txt(payload["title"], str(payload["chapter"]), entries), encoding="utf-8"
+    )
+    (output_dir / "chapter_script.md").write_text(
+        render_script_md(payload["title"], str(payload["chapter"]), entries), encoding="utf-8"
+    )
+    return payload
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build SERYE multi-part episodic storyboards.")
     ap.add_argument("--analysis", required=True, type=Path, help="Path to chapter_analysis.json")
@@ -371,6 +569,10 @@ def main():
         single_episode=args.single_episode,
     )
 
+    script_payload = write_script_artifacts(output_dir, data, scenes, analysis_path)
+    master_story["script_artifact"] = "chapter_script.json"
+    master_story["source_analysis_sha256"] = script_payload["source_analysis_sha256"]
+
     # Save Root Storyboard Artifacts
     (output_dir / "storyboard_9_16.json").write_text(
         json.dumps(master_story, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -387,6 +589,8 @@ def main():
         "total_blocks": master_story["total_blocks"],
         "total_duration_sec": master_story["total_duration_sec"],
         "pacing_mode": master_story["pacing_mode"],
+        "script_artifact": "chapter_script.json",
+        "source_analysis_sha256": script_payload["source_analysis_sha256"],
         "episodes": [
             {
                 "episode_number": ep["episode_number"],
@@ -406,8 +610,12 @@ def main():
     )
 
     # Save Per-Episode Directories if multi-part
+    episodes_dir = output_dir / "episodes"
+    if episodes_dir.exists():
+        for old_episode in episodes_dir.iterdir():
+            if old_episode.is_dir() and re.fullmatch(r"ep\d+", old_episode.name):
+                shutil.rmtree(old_episode)
     if len(episodes_meta) > 1:
-        episodes_dir = output_dir / "episodes"
         episodes_dir.mkdir(exist_ok=True)
         for ep in episodes_meta:
             ep_path = episodes_dir / ep["episode_id"]
@@ -421,6 +629,11 @@ def main():
                 "format": "SERYE drama block storyboard",
                 "block_duration_sec": 10,
                 "duration_sec": ep["duration_sec"],
+                "source_scene_count": ep["source_scene_count"],
+                "source_scene_ids": ep["source_scene_ids"],
+                "script_line_ids": ep["script_line_ids"],
+                "script_artifact": "chapter_script.json",
+                "source_analysis_sha256": script_payload["source_analysis_sha256"],
                 "blocks": ep["blocks"],
             }
             (ep_path / "storyboard_9_16.json").write_text(
@@ -431,6 +644,13 @@ def main():
             )
             (ep_path / "storyboard_9_16.html").write_text(
                 render_html(master_story, episode=ep), encoding="utf-8"
+            )
+            ep_script = write_script_artifacts(
+                ep_path,
+                data,
+                scenes,
+                analysis_path,
+                line_ids=set(ep["script_line_ids"]),
             )
 
     print(f"[OK] Generated {master_story['total_episodes']} episode(s), {master_story['total_blocks']} blocks ({master_story['total_duration_sec']}s total) for Chapter {master_story['chapter']}")
