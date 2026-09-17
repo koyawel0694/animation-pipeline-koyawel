@@ -1,7 +1,7 @@
 ---
 name: animation-pipeline-koyawel
 description: "Use when running the animation-pipeline-koyawel manga/manhwa/webtoon-to-video asset pipeline."
-version: 1.2.0
+version: 1.3.0
 author: John, Hermes Agent
 license: MIT
 platforms: [linux]
@@ -17,8 +17,8 @@ metadata:
 Turns one scraped manga/manhwa/manhua chapter into production-ready short-form video assets:
 1. **Scraped chapter panels**: Clean, numbered narrative pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
 2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) in `character_refs/` on neutral studio backdrops (`#F4F4F4`) with front full-body, 3/4 portrait, side profile, and action pose **matching the chosen art/animation style preset** (e.g. photorealistic live-action real human actors when `photorealistic_live_action` is selected; 2D model sheets when `webtoon_2d` is selected). Never paste 2D comic panels into a live-action reference.
-3. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze-frame ending in `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. Visual PNG storyboard sheet compositing (legacy `nano_storyboards/`) is omitted from default deliverables.
-4. **Block prompts in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/`.
+3. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze-frame ending in `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. For chapters > 25 pages, automatically segmented into 60s episodes (`episodes/ep01/`, `ep02/`). Visual PNG storyboard sheet compositing (legacy `nano_storyboards/`) is omitted from default deliverables.
+4. **Block prompts in .txt format per block per episode**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/` AND in each episode folder (`episodes/epXX/flow_queue/`), formatted for direct copy-paste into Google Flow.
 
 Visual storyboard PNG sheet generation (`nano_storyboards/` and `clean_frame_crops/`) is REMOVED from default pipeline deliverables. Video generation tools take prompt text and clean character references, not composite collage sheets. No final video rendering, no narration audio generation, no review prose, and no CSV files required.
 
@@ -27,7 +27,7 @@ Visual storyboard PNG sheet generation (`nano_storyboards/` and `clean_frame_cro
 - Scrape manga/manhwa/manhua panels from a URL or title into clean chapter assets.
 - Generate or reuse series character model sheets (9:16 PNGs at `768x1376`) matching the selected style preset.
 - Build 10-second SERYE drama narrative storyboard blocks (6 beats with timestamps, ending on freeze frame) in `storyboard_9_16.json`.
-- Export shot-by-shot and continuous block prompts in plain `.txt` format with `@@@NEXT@@@`.
+- Export shot-by-shot and continuous block prompts in plain `.txt` format with `@@@NEXT@@@` per block and per episode.
 - Verify a chapter's visual assets against the production contract.
 
 Don't use for: video rendering, audio/TTS synthesis, or CSV queue generation (plain `.txt` format is the deliverable).
@@ -55,11 +55,28 @@ output/<series-slug>/ch<chapter>/
   character_refs_source.json              # Provenance manifest (reused for Ch2+)
   storyboard_9_16.json                    # Canonical storyboard metadata (6 beats/block)
   storyboard_9_16.md / .html              # Production documentation
-  flow_queue/
+  episodes_manifest.json                  # Multi-part episodic manifest (when > 25 pages)
+  episodes/                               # Multi-part 60s episodic packages (when > 25 pages)
+    ep01/
+      storyboard_9_16.json / .md / .html
+      flow_queue/
+        block1_prompts.txt                # 6 shots separated by @@@NEXT@@@ (copy-paste ready)
+        block1_video_prompt.txt           # Continuous 10s master block prompt
+        ...
+        block6_prompts.txt
+        block6_video_prompt.txt
+        flow_6_continuous_blocks.txt      # 6 continuous blocks for ep01
+        flow_all_36_shots.txt             # 36 shots for ep01
+        prompt_txt_manifest.json          # Manifest for ep01
+    ep02/
+      storyboard_9_16.json / .md / .html
+      flow_queue/
+        ...
+  flow_queue/                             # Unified / single-episode prompt queue
     block1_prompts.txt                    # 6 shots separated by @@@NEXT@@@
     block1_video_prompt.txt               # Continuous 10s master block prompt
     ...
-    flow_6_continuous_blocks.txt          # All blocks combined with @@@NEXT@@@
+    flow_6_continuous_blocks.txt          # Continuous blocks separated by @@@NEXT@@@
     flow_all_36_shots.txt                 # Flat shots combined
     prompt_txt_manifest.json              # Manifest of all text prompts
 ```
@@ -130,12 +147,20 @@ python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysi
 Output: `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`.
 *NOTE: Visual storyboard sheet compositing (`nano_storyboards/*.png` and `clean_frame_crops/`) is REMOVED from the default pipeline. The narrative storyboard JSON feeds directly into prompt generation.*
 
-### Stage 5: Block Prompts Only in .txt Format
+### Stage 5: Block Prompts in .txt Format (Per Block & Per Episode)
 Export plain-text prompts for video generators (Google Flow, Kling, Runway):
 ```bash
 python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N> --style-preset <SELECTED_PRESET>
 ```
-Output: `flow_queue/block[1-6]_prompts.txt` (each containing 6 shot prompts separated by `\n\n@@@NEXT@@@\n\n`), `block[1-6]_video_prompt.txt`, and `flow_6_continuous_blocks.txt`.
+Output:
+- **Per-Episode Flow Queues** (`episodes/ep01/flow_queue/`, `ep02/flow_queue/`):
+  Each episode folder gets its own standalone `flow_queue/` with 1-indexed `block1_prompts.txt` through `block6_prompts.txt`, `block1_video_prompt.txt` through `block6_video_prompt.txt`, `flow_6_continuous_blocks.txt`, `flow_all_36_shots.txt`, and `prompt_txt_manifest.json`. Direct copy-paste ready for Google Flow!
+- **Root Flow Queue** (`flow_queue/`):
+  Full sequence of all blocks across all episodes (`block1_prompts.txt` to `blockN_prompts.txt`), combined continuous blocks, flat shots, and master manifest.
+- Can also be invoked directly on an episode folder:
+  ```bash
+  python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N>/episodes/ep01
+  ```
 - Style lock: Follows the selected preset from Stage 0 (e.g. Photorealistic Live-Action, 2D Korean Webtoon, Studio Ghibli, etc.) via `style_presets.json`. Prompt directives use `style_anchor`, `motion_anchor`, and `negative_anchor`.
 - Dialogue: Spoken English lines with parenthesized emotion cues: `(energetic, broadcast tone) ...`
 - Freeze frame: Beat 6 explicitly ends with: `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
@@ -146,14 +171,15 @@ Run the automated contract verifier:
 python3 verify_manga_chapter_assets.py --chapter-dir output/<slug>/ch<N>
 ```
 Must pass with exit code 0:
-`[OK] output/<slug>/ch<N>: N pages, 6 blocks, 36 beats verified`
+`[OK] output/<slug>/ch<N>: N pages, M blocks, K beats verified` (verifies root and all episode queues).
 
 ## Pitfalls & Core Rules
 
 1. **TXT Format Only**: The user requires `.txt` files with `@@@NEXT@@@`. Do NOT generate or deliver CSV queues unless explicitly requested.
-2. **Sequential Vision Only**: Never parallelize page analysis across multiple workers. Single sequential reader preserves chronology, character names, and dramatic tension.
-3. **Reuse Character References**: Never regenerate character model sheets on later chapters; always link back to Chapter 1 references via `character_refs_source.json`.
-4. **No Visual Storyboard Sheets**: Do NOT generate `nano_storyboards/*.png` or `clean_frame_crops/`. The deliverable is `storyboard_9_16.json` which feeds prompt generation.
-5. **No Scanlation Watermarks**: Exclude all promotional inserts, scanlator credits, and aggregator logos from narrative pages.
-6. **Style Preset Fidelity**: Character references and block prompts must strictly adhere to the chosen art/animation style preset. When `photorealistic_live_action` is chosen, character references must depict real human actors with natural skin texture and physical costumes—NEVER paste 2D comic art or crops into live-action reference sheets.
-7. **Parenthesized Emotion Tags**: Dialogue emotion cues must be inside parentheses at the start of the quote `(emotion, tone) Dialogue...`.
+2. **Prompts Per Episode**: For multi-part episodes, generate complete `flow_queue/` directories inside each `episodes/epXX/` folder so users can copy-paste blocks 1 to 6 directly into Google Flow without offset math.
+3. **Sequential Vision Only**: Never parallelize page analysis across multiple workers. Single sequential reader preserves chronology, character names, and dramatic tension.
+4. **Reuse Character References**: Never regenerate character model sheets on later chapters; always link back to Chapter 1 references via `character_refs_source.json`.
+5. **No Visual Storyboard Sheets**: Do NOT generate `nano_storyboards/*.png` or `clean_frame_crops/`. The deliverable is `storyboard_9_16.json` which feeds prompt generation.
+6. **No Scanlation Watermarks**: Exclude all promotional inserts, scanlator credits, and aggregator logos from narrative pages.
+7. **Style Preset Fidelity**: Character references and block prompts must strictly adhere to the chosen art/animation style preset. When `photorealistic_live_action` is chosen, character references must depict real human actors with natural skin texture and physical costumes—NEVER paste 2D comic art or crops into live-action reference sheets.
+8. **Parenthesized Emotion Tags**: Dialogue emotion cues must be inside parentheses at the start of the quote `(emotion, tone) Dialogue...`.

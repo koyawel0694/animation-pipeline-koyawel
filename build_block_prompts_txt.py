@@ -6,10 +6,12 @@ plain text only; CSV is an optional legacy integration and is not required for
 the manga chapter asset workflow.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
-import re
 from pathlib import Path
+import re
 
 
 DELIMITER = "\n\n@@@NEXT@@@\n\n"
@@ -30,10 +32,18 @@ STYLE_LOCK = (
 def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple[str, dict]:
     """Load an explicit preset, or the chapter's style_selection.json."""
     config = json.loads(STYLE_CONFIG_PATH.read_text(encoding="utf-8"))
-    selection = chapter_dir / "style_selection.json"
+    candidates = [
+        chapter_dir / "style_selection.json",
+        chapter_dir.parent / "style_selection.json",
+        chapter_dir.parent.parent / "style_selection.json",
+    ]
+    selection = next((p for p in candidates if p.exists()), None)
     selected = requested
-    if not selected and selection.exists():
-        selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
+    if not selected and selection and selection.exists():
+        try:
+            selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
+        except Exception:
+            selected = None
     presets = config.get("presets") or {}
     if not selected:
         available = ", ".join(sorted(presets))
@@ -48,20 +58,19 @@ def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple
 
 
 def style_lines(profile: dict) -> list[str]:
-    return [
+    lines = [
         text(profile.get("style_anchor")),
         text(profile.get("motion_anchor")),
         text(profile.get("negative_anchor")),
         COMMON_FRAME_ANCHOR,
-        text(profile.get("reference_anchor")),
     ]
+    ref_anchor = text(profile.get("reference_anchor"))
+    if ref_anchor:
+        lines.append(ref_anchor)
+    return [line for line in lines if line]
 
 
-def slugify(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "block"
-
-
-def text(value) -> str:
+def text(value: object) -> str:
     return " ".join(str(value or "").split())
 
 
@@ -80,12 +89,25 @@ def load_storyboard(chapter_dir: Path) -> tuple[dict, list[dict]]:
     return data, blocks
 
 
-def format_shot_prompt(title: str, block: dict, beat: dict, block_number: int, beat_number: int, profile: dict) -> str:
+def format_shot_prompt(
+    title: str,
+    block: dict,
+    beat: dict,
+    block_number: int,
+    beat_number: int,
+    profile: dict,
+    episode_context: str | None = None,
+) -> str:
     final = beat_number == len(block.get("beats") or []) - 1
+    header = (
+        f"{episode_context}, beat {beat_number + 1}, timing {text(beat.get('timestamp'))}."
+        if episode_context
+        else f"Storyboard block {block_number}, beat {beat_number + 1}, timing {text(beat.get('timestamp'))}."
+    )
     lines = [
         *style_lines(profile),
         f"Series: {text(title)}.",
-        f"Storyboard block {block_number}, beat {beat_number + 1}, timing {text(beat.get('timestamp'))}.",
+        header,
         f"Create one continuous full-bleed shot for the beat labelled {text(beat.get('label'))}.",
         f"Action and composition: {text(beat.get('action'))}",
         f"Camera movement: {text(beat.get('camera'))}",
@@ -107,7 +129,13 @@ def format_shot_prompt(title: str, block: dict, beat: dict, block_number: int, b
     return "\n".join(line for line in lines if line.rstrip(": "))
 
 
-def format_continuous_prompt(title: str, block: dict, block_number: int, profile: dict) -> str:
+def format_continuous_prompt(
+    title: str,
+    block: dict,
+    block_number: int,
+    profile: dict,
+    episode_context: str | None = None,
+) -> str:
     beats = block.get("beats") or []
     beat_lines = []
     for index, beat in enumerate(beats, 1):
@@ -115,11 +143,15 @@ def format_continuous_prompt(title: str, block: dict, block_number: int, profile
             f"Beat {index} ({text(beat.get('timestamp'))}) — {text(beat.get('label'))}: "
             f"{text(beat.get('action'))} Camera: {text(beat.get('camera'))}."
         )
+    block_target = (
+        episode_context
+        if episode_context
+        else f"storyboard block {block_number}: {text(block.get('block_title'))}"
+    )
     return "\n".join([
         *style_lines(profile),
         f"Series: {text(title)}.",
-        f"Create one coherent 10-second vertical drama block, storyboard block {block_number}: "
-        f"{text(block.get('block_title'))}.",
+        f"Create one coherent 10-second vertical drama block, {block_target}.",
         "Maintain exact character identity, wardrobe, setting continuity, and chronological action across the beats.",
         *beat_lines,
         "Use the final beat as a complete freeze frame; do not add a new action after the final pose.",
@@ -142,7 +174,20 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     style_id, profile = load_style_profile(chapter_dir, args.style_preset)
     data, blocks = load_storyboard(chapter_dir)
-    title = data.get("title") or chapter_dir.name
+    title = (
+        data.get("title")
+        or (
+            json.loads((chapter_dir / "metadata.json").read_text(encoding="utf-8")).get("title")
+            if (chapter_dir / "metadata.json").exists()
+            else None
+        )
+        or (
+            json.loads((chapter_dir.parent.parent / "metadata.json").read_text(encoding="utf-8")).get("title")
+            if (chapter_dir.parent.parent / "metadata.json").exists()
+            else None
+        )
+        or chapter_dir.name
+    )
     all_shots: list[str] = []
     continuous: list[str] = []
     manifest = {
@@ -154,19 +199,42 @@ def main() -> None:
         "blocks": [],
     }
 
-    # If multi-part episodic, also support per-episode structures
     has_episodes = bool(data.get("episodes") and len(data.get("episodes")) > 1)
     episode_prompts: dict[int, list[str]] = {}
     episode_continuous: dict[int, list[str]] = {}
+    episode_manifests: dict[int, dict] = {}
 
     for block_number, block in enumerate(blocks, 1):
         ep_num = block.get("episode_number", 1)
         ep_block_num = block.get("episode_block_number", block_number)
+
+        # Shot prompts for root flow_queue
         shots = [
             format_shot_prompt(title, block, beat, block_number, beat_number, profile)
             for beat_number, beat in enumerate(block.get("beats") or [])
         ]
         continuous_prompt = format_continuous_prompt(title, block, block_number, profile)
+
+        # Shot prompts tailored for the specific episode (1-indexed per episode)
+        ep_shots = [
+            format_shot_prompt(
+                title,
+                block,
+                beat,
+                block_number,
+                beat_number,
+                profile,
+                episode_context=f"Episode {ep_num}, storyboard block {ep_block_num}" if has_episodes else None,
+            )
+            for beat_number, beat in enumerate(block.get("beats") or [])
+        ]
+        ep_continuous_prompt = format_continuous_prompt(
+            title,
+            block,
+            block_number,
+            profile,
+            episode_context=f"Episode {ep_num}, block {ep_block_num}: {text(block.get('block_title'))}" if has_episodes else None,
+        )
 
         # Write root block prompt files
         write_delimited(output_dir / f"block{block_number}_prompts.txt", shots)
@@ -174,22 +242,42 @@ def main() -> None:
             continuous_prompt + "\n", encoding="utf-8"
         )
 
-        # If multi-episode, also write epXX_blockN files
+        # If multi-episode, also write epXX_blockN files in root and mirror into chapter_dir/episodes/epXX/flow_queue
         if has_episodes:
-            write_delimited(output_dir / f"ep{ep_num:02d}_block{ep_block_num}_prompts.txt", shots)
+            write_delimited(output_dir / f"ep{ep_num:02d}_block{ep_block_num}_prompts.txt", ep_shots)
             (output_dir / f"ep{ep_num:02d}_block{ep_block_num}_video_prompt.txt").write_text(
-                continuous_prompt + "\n", encoding="utf-8"
+                ep_continuous_prompt + "\n", encoding="utf-8"
             )
-            episode_prompts.setdefault(ep_num, []).extend(shots)
-            episode_continuous.setdefault(ep_num, []).append(continuous_prompt)
+            episode_prompts.setdefault(ep_num, []).extend(ep_shots)
+            episode_continuous.setdefault(ep_num, []).append(ep_continuous_prompt)
 
-            # Also mirror into chapter_dir/episodes/epXX/flow_queue
             ep_dir = chapter_dir / "episodes" / f"ep{ep_num:02d}" / "flow_queue"
             ep_dir.mkdir(parents=True, exist_ok=True)
-            write_delimited(ep_dir / f"block{ep_block_num}_prompts.txt", shots)
+            write_delimited(ep_dir / f"block{ep_block_num}_prompts.txt", ep_shots)
             (ep_dir / f"block{ep_block_num}_video_prompt.txt").write_text(
-                continuous_prompt + "\n", encoding="utf-8"
+                ep_continuous_prompt + "\n", encoding="utf-8"
             )
+
+            if ep_num not in episode_manifests:
+                episode_manifests[ep_num] = {
+                    "chapter_dir": str(chapter_dir / "episodes" / f"ep{ep_num:02d}"),
+                    "episode_number": ep_num,
+                    "format": "plain-text-prompts",
+                    "style_preset": style_id,
+                    "total_blocks": 0,
+                    "total_shots": 0,
+                    "blocks": [],
+                }
+            episode_manifests[ep_num]["total_blocks"] += 1
+            episode_manifests[ep_num]["total_shots"] += len(ep_shots)
+            episode_manifests[ep_num]["blocks"].append({
+                "block": ep_block_num,
+                "overall_block": block_number,
+                "title": block.get("block_title"),
+                "shot_count": len(ep_shots),
+                "prompts_file": str(ep_dir / f"block{ep_block_num}_prompts.txt"),
+                "continuous_file": str(ep_dir / f"block{ep_block_num}_video_prompt.txt"),
+            })
 
         all_shots.extend(shots)
         continuous.append(continuous_prompt)
@@ -203,13 +291,18 @@ def main() -> None:
             "continuous_file": str(output_dir / f"block{block_number}_video_prompt.txt"),
         })
 
-    # Write episode-level continuous files if multi-part
+    # Write episode-level continuous and all-shots files if multi-part
     if has_episodes:
         for ep_num, ep_cont in episode_continuous.items():
             write_delimited(output_dir / f"ep{ep_num:02d}_flow_6_continuous_blocks.txt", ep_cont)
             ep_dir = chapter_dir / "episodes" / f"ep{ep_num:02d}" / "flow_queue"
             write_delimited(ep_dir / "flow_6_continuous_blocks.txt", ep_cont)
             write_delimited(ep_dir / f"flow_all_{len(episode_prompts[ep_num])}_shots.txt", episode_prompts[ep_num])
+            if ep_num in episode_manifests:
+                (ep_dir / "prompt_txt_manifest.json").write_text(
+                    json.dumps(episode_manifests[ep_num], indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
 
     write_delimited(output_dir / f"flow_{len(continuous)}_continuous_blocks.txt", continuous)
     write_delimited(output_dir / f"flow_all_{len(all_shots)}_shots.txt", all_shots)

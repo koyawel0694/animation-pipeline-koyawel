@@ -157,6 +157,35 @@ def check_prompt_txt(chapter_dir: Path, block_count: int, shot_count: int, error
     if not any(re.search(rf"flow_all_{shot_count}_shots\.txt$", str(path)) for path in combined):
         fail(errors, f"missing combined shot TXT for {shot_count} shots")
 
+    # If multi-part episodic directory exists, also verify per-episode flow_queue
+    episodes_dir = chapter_dir / "episodes"
+    if episodes_dir.is_dir():
+        ep_dirs = sorted(p for p in episodes_dir.iterdir() if p.is_dir())
+        for ep_dir in ep_dirs:
+            ep_queue = ep_dir / "flow_queue"
+            if not ep_queue.is_dir():
+                fail(errors, f"missing flow_queue in episode {ep_dir.name}")
+                continue
+            ep_manifest = load_json(ep_queue / "prompt_txt_manifest.json", errors)
+            ep_blocks = len(ep_manifest.get("blocks") or []) if ep_manifest else 6
+            for b_idx in range(1, ep_blocks + 1):
+                bp = ep_queue / f"block{b_idx}_prompts.txt"
+                if not bp.exists():
+                    fail(errors, f"missing {bp} in episode {ep_dir.name}")
+                else:
+                    b_parts = [p for p in bp.read_text(encoding="utf-8").split("@@@NEXT@@@") if p.strip()]
+                    if len(b_parts) != 6:
+                        fail(errors, f"{bp.name} in {ep_dir.name} has {len(b_parts)} prompts, expected 6")
+                    if "freeze frame" not in b_parts[-1].lower():
+                        fail(errors, f"{bp.name} in {ep_dir.name} lacks freeze-frame instruction")
+                b_vp = ep_queue / f"block{b_idx}_video_prompt.txt"
+                if not b_vp.exists():
+                    fail(errors, f"missing {b_vp} in episode {ep_dir.name}")
+            if not (ep_queue / "flow_6_continuous_blocks.txt").exists():
+                fail(errors, f"missing flow_6_continuous_blocks.txt in {ep_dir.name}")
+            if not any(re.search(r"flow_all_\d+_shots\.txt$", p.name) for p in ep_queue.iterdir() if p.is_file()):
+                fail(errors, f"missing flow_all_*_shots.txt in {ep_dir.name}")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify manga chapter assets")
