@@ -1,7 +1,7 @@
 ---
 name: animation-pipeline-koyawel
 description: "Use when running the animation-pipeline-koyawel manga/manhwa/webtoon-to-video asset pipeline."
-version: 1.0.0
+version: 1.1.0
 author: John, Hermes Agent
 license: MIT
 platforms: [linux]
@@ -24,25 +24,51 @@ Production-grade automated asset pipeline converting manga, manhwa, manhua, and 
 - Verification script: `verify_manga_chapter_assets.py`
 - Test suite: `python3 -m unittest discover -s tests`
 
-## Core Asset Deliverables
+---
 
-1. **Scraped chapter panels**: Clean, numbered pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
-2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) on neutral studio backdrops in `character_refs/`.
-3. **9:16 vertical storyboards**: 10-second SERYE drama director sheets (`768x1376`, 5 rows: 2+1+2+2+1, 6 beats with timestamps, ending on freeze frame) in `nano_storyboards/`.
-4. **Block prompts only in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter, `blockN_video_prompt.txt`, and `flow_6_continuous_blocks.txt`) in `flow_queue/`.
+## 🎨 Supported Art & Animation Styles
 
-## Multi-Style Support
+The pipeline supports 9 distinct visual presets in `style_presets.json`:
 
-Supported presets configured in `style_presets.json`:
-- `photorealistic_live_action` — live-action cinematic adaptation (real human performers, cinematic lighting/lenses, practical/CGI effects).
-- `webtoon_2d` — authentic Korean webtoon manhwa line art, flat cel-shaded coloring, controlled 2D animation.
-- `anime_sakuga_2d` — high-energy hand-drawn key poses, dynamic perspective, impact frames, speed effects.
-- `motion_comic_2d` — source-faithful art with multiplane parallax, pans/zooms, and selective movement.
+1. **`photorealistic_live_action`**: Cinematic Photorealistic Live-Action (real human actors, cinematic lenses, grounded sets, natural skin texture, practical/CGI fantasy VFX).
+2. **`studio_ghibli`**: Studio Ghibli Nostalgic Hand-Painted Anime (lush watercolor backgrounds, soft natural cel shading, gentle expressive character linework, warm sunlight).
+3. **`webtoon_2d`**: 2D Korean Webtoon / Manhwa Anime (crisp clean dark ink lines, vibrant flat cel shading, authentic manhwa character features, controlled fluid 2D animation).
+4. **`anime_sakuga_2d`**: Dynamic Japanese Anime Sakuga Action (high-energy hand-drawn key poses, dynamic perspective distortion, sharp shadow cuts, impact frames, speed lines).
+5. **`stylized_3d_animation`**: Stylized 3D Animated Film (Pixar / DreamWorks style, tactile materials, soft subsurface scattering on skin, dimensional studio lighting).
+6. **`dark_fantasy_anime`**: Dark Fantasy Anime (gritty gothic chiaroscuro, heavy ink shadows, moody atmospheric haze, glowing magical aura effects).
+7. **`cyberpunk_neon`**: Cyberpunk / Sci-Fi Anime (neon highlights, rain reflections, volumetric fog, chromatic aberration, sleek tech detailing).
+8. **`motion_comic_2d`**: Source-Faithful Motion Comic (preserves original comic book / manhwa print artwork with multiplane parallax depth, camera pans, and zooms).
+9. **`classic_comic_book`**: Western Graphic Novel / Comic Book (bold expressive ink brushstrokes, dynamic cross-hatching, vintage Ben-Day halftone dot styling).
 
-To select a style preset for export:
-```bash
-python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N> --style-preset photorealistic_live_action
-```
+---
+
+## ⚠️ STAGE 0: MANDATORY STYLE PROMPT (BEFORE ALL PROCESSES)
+
+**CRITICAL AGENT RULE**:
+Before generating ANY visual assets (character reference model sheets, storyboards, or block prompts), you **MUST** prompt the user to choose their preferred art and animation style using the `clarify` tool, UNLESS the user has already explicitly stated their preferred style in their message!
+
+**NEVER silently default to the 2D manhwa style or skip asking the user.**
+
+When calling `clarify`, present the top recommended choices:
+- "Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)"
+- "Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)"
+- "2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)"
+- "Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)"
+- "Stylized 3D Animated Film (Pixar/DreamWorks style 3D characters, tactile materials)"
+- "Dark Fantasy Anime (gritty chiaroscuro, heavy ink shadows, glowing magical auras)"
+
+Once the user selects a style:
+1. Immediately save the selection to `output/<slug>/ch<N>/style_selection.json`:
+   ```json
+   {
+     "default_preset": "<SELECTED_PRESET>",
+     "label": "<LABEL>",
+     "selected_by_user": true
+   }
+   ```
+2. Pass `--style-preset <SELECTED_PRESET>` to ALL downstream generation commands.
+
+---
 
 ## Canonical Pipeline Stages
 
@@ -56,20 +82,39 @@ python3 manga_source_scraper.py --url "<MANGA_URL>" --output-dir output/<slug>/c
 python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch<N>
 ```
 
-### Stage 3: Character Reference Sheets
+### Stage 3: Character Reference Sheets (In Selected Art Style)
+Generate 9:16 model sheets matching the selected art style (e.g. photorealistic actor turnaround, Ghibli watercolor character, 2D webtoon, etc.):
 ```bash
-python3 generate_nano_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
+python3 generate_nano_storyboards.py \
+  --chapter-dir output/<slug>/ch<N> \
+  --characters \
+  --style-preset <SELECTED_PRESET>
+```
+*Note: For Chapter 2+, reuse established Chapter 1 references unless a style change was requested:*
+```bash
+python3 generate_nano_storyboards.py \
+  --chapter-dir output/<slug>/ch<N> \
+  --reference-dir output/<slug>/ch1/character_refs
 ```
 
-### Stage 4: 9:16 Vertical Storyboards
+### Stage 4: 9:16 Vertical Storyboards (In Selected Art Style)
 ```bash
+# Generate storyboard metadata:
 python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N>
-python3 compose_chapter_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
+
+# Render visual storyboard sheets matching selected style:
+python3 generate_nano_storyboards.py \
+  --chapter-dir output/<slug>/ch<N> \
+  --storyboards \
+  --style-preset <SELECTED_PRESET>
 ```
 
 ### Stage 5: Block Prompts (.txt format with @@@NEXT@@@)
+Export plain-text prompts for Google Flow, Kling, or Veo matching the selected style:
 ```bash
-python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N> --style-preset <PRESET>
+python3 build_block_prompts_txt.py \
+  --chapter-dir output/<slug>/ch<N> \
+  --style-preset <SELECTED_PRESET>
 ```
 
 ### Stage 6: Asset Verification

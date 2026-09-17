@@ -109,23 +109,74 @@ def storyboard_asset_command(
     ]
 
 
-def character_generation_command(chapter_dir: Path, python_bin: str) -> list[str]:
+def character_generation_command(chapter_dir: Path, python_bin: str, style_preset: str | None = None) -> list[str]:
     """Return first-chapter character-reference generation command."""
-    return [
+    cmd = [
         python_bin,
         str(SCRIPT_DIR / "generate_nano_storyboards.py"),
         "--chapter-dir",
         str(chapter_dir),
         "--characters",
     ]
+    if style_preset:
+        cmd.extend(["--style-preset", style_preset])
+    return cmd
 
 
-def run_storyboard_assets(chapter_dir: Path, python_bin: str):
+def choose_style_preset(chapter_dir: Path | None = None, requested_preset: str | None = None) -> str:
+    """Prompt or resolve art style preset before generating assets."""
+    config_path = SCRIPT_DIR / "style_presets.json"
+    if not config_path.exists():
+        return requested_preset or "webtoon_2d"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    presets = config.get("presets", {})
+
+    if requested_preset:
+        if requested_preset in presets:
+            return requested_preset
+        available = ", ".join(sorted(presets))
+        raise ValueError(f"Unknown style preset {requested_preset!r}; choose one of: {available}")
+
+    if chapter_dir:
+        sel = chapter_dir / "style_selection.json"
+        if sel.exists():
+            try:
+                val = json.loads(sel.read_text()).get("default_preset")
+                if val in presets:
+                    return val
+            except Exception:
+                pass
+
+    if sys.stdin and sys.stdin.isatty():
+        print("\n" + "=" * 60)
+        print(" SELECT ART & ANIMATION STYLE PRESET BEFORE GENERATION")
+        print("=" * 60)
+        preset_keys = list(presets.keys())
+        for idx, key in enumerate(preset_keys, 1):
+            label = presets[key].get("label", key)
+            desc = presets[key].get("description", "")
+            print(f"  [{idx}] {label} ({key})")
+            if desc:
+                print(f"      {desc}")
+        print("=" * 60)
+        try:
+            choice = input(f"Enter choice [1-{len(preset_keys)}] (default: 1): ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(preset_keys):
+                return preset_keys[int(choice) - 1]
+            elif choice in presets:
+                return choice
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+    return config.get("default_for_unconfigured_chapters", "webtoon_2d")
+
+
+def run_storyboard_assets(chapter_dir: Path, python_bin: str, style_preset: str | None = None):
     """Ensure identity refs exist, then build chapter storyboard PNGs."""
     refs = resolve_character_reference_dir(chapter_dir)
     if not refs.is_dir() or not list(refs.glob("*.png")):
         run_command(
-            character_generation_command(chapter_dir, python_bin),
+            character_generation_command(chapter_dir, python_bin, style_preset=style_preset),
             label="Initial Character Reference Generator",
         )
         refs = chapter_dir / "character_refs"
@@ -142,6 +193,7 @@ def orchestrate_manga_pipeline(
     existing_dir: str = None,
     stage: str = "all",
     output_base: str | None = None,
+    style_preset: str | None = None,
 ) -> list[Path]:
     base_out = Path(output_base or (SCRIPT_DIR / "output")).resolve()
     base_out.mkdir(parents=True, exist_ok=True)
@@ -184,6 +236,22 @@ def orchestrate_manga_pipeline(
         print_banner(f"PROCESSING CHAPTER: {ch_dir.name}")
         ch_dir = ch_dir.resolve()
 
+        # Step 0: Resolve Art Style Preset before any generation
+        active_style = choose_style_preset(ch_dir, requested_preset=style_preset)
+        selection_path = ch_dir / "style_selection.json"
+        if style_preset or not selection_path.exists():
+            config_path = SCRIPT_DIR / "style_presets.json"
+            preset_label = active_style
+            if config_path.exists():
+                presets = json.loads(config_path.read_text(encoding="utf-8")).get("presets") or {}
+                preset_label = presets.get(active_style, {}).get("label", active_style)
+            selection_path.write_text(json.dumps({
+                "default_preset": active_style,
+                "label": preset_label,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }, indent=2), encoding="utf-8")
+        print(f"[STYLE] Active art style preset: {active_style}\n")
+
         # Stage: Canonical Sequential Image Analysis
         if stage in ("all", "analyze"):
             print_banner("STAGE 2: CANONICAL SEQUENTIAL IMAGE ANALYSIS")
@@ -214,7 +282,7 @@ def orchestrate_manga_pipeline(
                     label="SERYE 10s Storyboard Blocks Builder",
                 )
             else:
-                print(f"[WARN] {canon_json} not found. Skipping SERYE storyboard generation.")
+                print(f"[WARN] Missing {canon_json}; skipping storyboard block definition.")
 
         # Stage: Character identity refs + visual storyboard sheets
         # Reuse established Chapter 1 refs; compose chapter-local sheets.
@@ -223,7 +291,7 @@ def orchestrate_manga_pipeline(
             storyboard_json = ch_dir / "storyboard_9_16.json"
             prompts_csv = ch_dir / "video_prompts.csv"
             if storyboard_json.exists() and prompts_csv.exists():
-                run_storyboard_assets(ch_dir, python_bin)
+                run_storyboard_assets(ch_dir, python_bin, style_preset=active_style)
             else:
                 missing = [str(path) for path in (prompts_csv, storyboard_json) if not path.exists()]
                 print(f"[WARN] Missing required upstream artifact(s): {', '.join(missing)}. Skipping visual asset generation.")
@@ -233,7 +301,7 @@ def orchestrate_manga_pipeline(
             print_banner("STAGE 3D: BLOCK PROMPTS (PLAIN TEXT)")
             prompt_txt_script = SCRIPT_DIR / "build_block_prompts_txt.py"
             run_command(
-                [python_bin, str(prompt_txt_script), "--chapter-dir", str(ch_dir)],
+                [python_bin, str(prompt_txt_script), "--chapter-dir", str(ch_dir), "--style-preset", active_style],
                 label="Chapter Block Prompt TXT Exporter",
             )
 
@@ -264,6 +332,7 @@ def main():
     parser.add_argument("--existing-dir", "-e", default=None, help="Process an existing chapter directory")
     parser.add_argument("--stage", default="all", choices=["all", "scrape", "analyze", "prompts", "storyboard", "visuals", "flow"], help="Run specific pipeline stage")
     parser.add_argument("--output-base", "-o", default=None, help="Output base directory (defaults to ./output)")
+    parser.add_argument("--style-preset", "-s", default=None, help="Art style preset (e.g. photorealistic_live_action, studio_ghibli, webtoon_2d, etc.)")
     args = parser.parse_args()
 
     target = args.url or args.title
@@ -274,6 +343,7 @@ def main():
         existing_dir=args.existing_dir,
         stage=args.stage,
         output_base=args.output_base,
+        style_preset=args.style_preset,
     )
 
 

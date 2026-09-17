@@ -1,43 +1,115 @@
 {
-  "schema_version": 1,
-  "description": "Style and motion presets for manga/manhwa/webtoon-to-video prompt export.",
+  "schema_version": 2,
+  "description": "Art style and animation presets for character reference generation, storyboards, and video prompt export.",
   "default_for_unconfigured_chapters": "webtoon_2d",
   "presets": {
     "photorealistic_live_action": {
-      "label": "Photorealistic live-action adaptation",
+      "label": "Cinematic Photorealistic Live-Action",
       "media_mode": "live_action",
+      "description": "Live-action cinematic film adaptation featuring real human actors, grounded physical environments, cinematic camera lenses, realistic skin texture and wardrobe fabrics, with practical/CGI fantasy visual effects integrated into the filmed plate.",
+      "character_ref_style": "Visual style: photorealistic cinematic live-action turnaround. Real human actor with natural skin pores, realistic hair strands, physical costume tailoring with authentic fabric weave, photographed with an 85mm portrait cinema lens on a neutral off-white studio backdrop with soft three-point key lighting. STRICTLY NOT 2D illustration, NOT anime drawing, NOT cel shaded, NOT comic lines.",
+      "storyboard_style": "Visual style: photorealistic live-action cinematic film storyboard. Real photographed humans, grounded cinematic environments, cinema lenses, natural optical depth of field, dramatic physical film lighting. STRICTLY NOT drawn 2D comic art, NOT anime.",
       "style_anchor": "Visual style: photorealistic live-action cinematic adaptation of the source manhwa. Real human actors, grounded physical environments, practical costumes and props, cinematic production design, natural skin texture, physically plausible lighting, live-action lens rendering, subtle film grain, and high-end theatrical fantasy cinematography. Fantasy creatures and magic are practical/CGI effects integrated into the live-action plate with correct scale, contact shadows, reflections, smoke, sparks, and atmospheric depth. The source comic is a design and story reference only; do not show drawn comic art.",
       "motion_anchor": "Motion style: physically grounded live-action performance with believable weight, inertia, cloth, hair, debris, smoke, and creature motion. Use restrained dolly, crane, handheld, Steadicam, or lens push movements chosen for the beat; action should feel photographed by a real camera, not like a 2D animation.",
       "negative_anchor": "STRICTLY NOT 2D illustration, NOT anime, NOT cel shading, NOT manhwa line art, NOT comic panels, NOT motion-comic parallax, NOT plastic CGI humans, NOT game-rendered characters, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
       "reference_anchor": "Use live-action character reference images or grounded casting descriptions as identity anchors. If a 2D character sheet is supplied, use it only to preserve facial structure, hair, wardrobe, props, and silhouette; translate all of those design cues into plausible live action.",
-      "audio_anchor": "Sound design: production-location ambience, footsteps, cloth and prop foley, physically grounded impacts, atmospheric room tone, and cinematic score; spoken dialogue is natural English performance."
+      "audio_anchor": "Sound design: authentic location sound, dialogue captured with production boom mics, natural room acoustics, realistic physical impacts, and grounded orchestral film score."
+    },
+    "studio_ghibli": {
+      "label": "Studio Ghibli Nostalgic Hand-Painted Anime",
+      "media_mode": "animation_2d",
+      "description": "Nostalgic traditional hand-drawn anime aesthetic inspired by Studio Ghibli. Lush watercolor painted backgrounds, soft natural cel shading, gentle expressive character linework, warm sunlight, and a whimsical yet grounded emotional atmosphere.",
+      "character_ref_style": "Art style: authentic Studio Ghibli traditional hand-drawn anime aesthetic. Gentle soft ink outlines, warm hand-painted watercolor textures, painterly cel shading, nostalgic and expressive character features, natural warm lighting on neutral studio backdrop. STRICTLY NOT 3D CGI render, NOT hyper-realistic live action, NOT sharp western comic art.",
+      "storyboard_style": "Art style: Studio Ghibli hand-painted anime storyboard. Whimsical yet grounded compositions, warm nostalgic watercolor background tones, soft cel-shaded character figures, gentle natural lighting.",
+      "style_anchor": "Art style: authentic Studio Ghibli hand-drawn animation aesthetic. Lush painterly watercolor backgrounds, soft natural ink outlines, warm cel-shaded character coloring, rich environmental atmosphere, nostalgic daylight and golden hour tones.",
+      "motion_anchor": "Motion style: expressive traditional hand-drawn animation timing, gentle organic clothing and hair flutter in the breeze, lively emotive character acting, natural breeze and atmospheric particle movement.",
+      "negative_anchor": "STRICTLY NOT 3D CGI render, NOT photorealistic live action, NOT gritty western comic, NOT plastic models, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve character facial structure, hairstyle, and wardrobe in traditional Ghibli hand-drawn anime aesthetic.",
+      "audio_anchor": "Sound design: gentle acoustic piano and orchestral melodies, natural environmental winds, birdsong, rustic footsteps, expressive organic foley."
     },
     "webtoon_2d": {
-      "label": "2D Korean webtoon/manhwa cel animation",
-      "media_mode": "2d_animation",
+      "label": "2D Korean Webtoon / Manhwa Anime",
+      "media_mode": "animation_2d",
+      "description": "Authentic 2D Korean webtoon / manhwa animation with crisp clean dark ink lines, vibrant flat cel-shaded coloring, authentic manhwa character features, and controlled fluid 2D animation.",
+      "character_ref_style": "Art style: authentic 2D Korean webtoon manhwa anime animation. Crisp clean dark ink line art, vibrant flat cel-shaded coloring, authentic manhwa character features, professional model sheet on off-white studio background. STRICTLY NOT 3D render, NOT live action, NOT photorealistic.",
+      "storyboard_style": "Art style: authentic 2D Korean webtoon manhwa director sheet. Crisp dark ink lines, vibrant cel shading, high-contrast dramatic framing.",
       "style_anchor": "Art style: authentic 2D Korean webtoon manhwa anime animation. Crisp clean dark ink line art, vibrant flat cel-shaded coloring, authentic manhwa character features, controlled 2D animation, and cinematic vertical composition.",
-      "motion_anchor": "Motion style: deliberate 2D limited animation with expressive key poses, selective in-betweens, animated hair and cloth, controlled effects, camera pushes, pans, cranes, and readable impact frames.",
-      "negative_anchor": "STRICTLY NOT 3D render, NOT live-action CGI, NOT photorealistic, NOT western comic-book style, NOT comic panels, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
-      "reference_anchor": "Use the supplied 2D character reference sheets as exact identity anchors for face, hair, body proportions, wardrobe, props, and color palette.",
-      "audio_anchor": "Sound design: stylized 2D impact accents, environmental ambience, cinematic music, and spoken English dialogue with the emotion cue at the start."
+      "motion_anchor": "Motion style: controlled 2D anime animation. Fluid character keyframes, clean directional camera pushes, snap-zooms, parallax layered backgrounds, and dynamic anime action timing. Avoid floaty tweening and maintain solid key poses.",
+      "negative_anchor": "STRICTLY NOT 3D render, NOT live-action CGI, NOT photorealistic, NOT western comic-book style, NOT comic panels, NOT border frames, NOT split screen, NOT multi-panel collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve exact character faces, hair, body proportions, and wardrobe anchors from the canonical 2D character reference sheets.",
+      "audio_anchor": "Sound design: punchy modern anime sound effects, dynamic whooshes, crisp magical impacts, and atmospheric modern synth/orchestral anime score."
     },
     "anime_sakuga_2d": {
-      "label": "Hand-drawn anime sakuga action",
-      "media_mode": "2d_animation",
-      "style_anchor": "Art style: premium hand-drawn 2D anime action animation with clean expressive ink, strong key poses, dynamic perspective, confident anatomy, high-contrast cel shading, selective smear frames, speed lines, impact bursts, and cinematic color design.",
-      "motion_anchor": "Motion style: high-energy hand-drawn keyframe animation for the main action, with fluid anticipation, follow-through, squash and stretch where appropriate, fast readable camera language, animated effects, and brief held poses for dramatic emphasis.",
-      "negative_anchor": "STRICTLY NOT 3D CGI, NOT photorealistic, NOT live-action, NOT generic western cartoon, NOT static slideshow, NOT comic panels, NOT storyboard collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
-      "reference_anchor": "Use the supplied character references to lock facial identity, hairstyle, costume anchors, weapon design, creature anatomy, and palette across every shot.",
-      "audio_anchor": "Sound design: sharp anime-style action impacts, weapon accents, magical effects, environmental ambience, score hits, and spoken English dialogue with emotion cues."
+      "label": "Dynamic Japanese Anime Sakuga Action",
+      "media_mode": "animation_2d",
+      "description": "High-energy hand-drawn Japanese anime sakuga action animation. Dynamic perspective distortion, dramatic shadow cuts, expressive key poses, impact frames, speed lines, and kinetic action choreography.",
+      "character_ref_style": "Art style: dynamic Japanese anime sakuga key animation model sheet. High-tension expressive linework, sharp shadow cuts, kinetic posture, bold anime proportions on neutral background. STRICTLY NOT 3D CGI, NOT live action.",
+      "storyboard_style": "Art style: dynamic Japanese anime action storyboard. Dutch angles, dramatic foreshortening, explosive impact framing, sharp anime ink lines.",
+      "style_anchor": "Art style: high-budget Japanese anime sakuga action animation. Expressive hand-drawn linework with variable line weight, dramatic angular shadow blocks, dynamic perspective distortion, extreme foreshortening, and intense visual impact.",
+      "motion_anchor": "Motion style: high-frame-rate kinetic sakuga animation with fast snappy key poses, exaggerated perspective shifts, impact frames, dynamic camera tracking, and explosive action timing.",
+      "negative_anchor": "STRICTLY NOT stiff 3D CGI, NOT photorealistic live action, NOT slow limited animation, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve character features and wardrobe while rendering with dynamic sakuga line energy and sharp dramatic shadows.",
+      "audio_anchor": "Sound design: heavy bass drops, explosive impact crunches, tearing wind whooshes, high-tempo battle anime soundtrack."
+    },
+    "stylized_3d_animation": {
+      "label": "Stylized 3D Animated Film (Pixar / DreamWorks Style)",
+      "media_mode": "animation_3d",
+      "description": "Premium stylized 3D feature film render with appealing expressive character designs, tactile cloth and skin materials, soft subsurface scattering, and rich dimensional studio lighting.",
+      "character_ref_style": "Visual style: premium stylized 3D animated feature film character model sheet (Pixar/DreamWorks style). Tactile surface materials, soft subsurface scattering on skin, rich dimensional rim lighting, clean 3D clay/rendered turnaround on neutral backdrop. STRICTLY NOT 2D flat drawing, NOT live action.",
+      "storyboard_style": "Visual style: 3D animated feature film color script storyboard. Volumetric lighting, 3D depth of field, rich stylized textures, cinematic framing.",
+      "style_anchor": "Visual style: premium stylized 3D animated feature film cinematography. Rich tactile surface textures, expressive stylized facial anatomy, soft subsurface scattering on skin, volumetric atmospheric lighting, cinematic 3D depth of field.",
+      "motion_anchor": "Motion style: polished 3D character animation with natural physical weight, secondary squash and stretch, expressive facial micro-movements, and smooth cinematic camera tracking.",
+      "negative_anchor": "STRICTLY NOT flat 2D lines, NOT harsh comic ink, NOT live action, NOT uncanny valley photorealism, NOT subtitles, NOT watermark.",
+      "reference_anchor": "Translate character features into stylized 3D appeal while strictly preserving facial structure, hair color, and wardrobe anchors.",
+      "audio_anchor": "Sound design: rich cinematic theatrical foley, detailed material sound effects, full orchestral animation score."
+    },
+    "dark_fantasy_anime": {
+      "label": "Dark Fantasy Anime (Gothic / Gritty Style)",
+      "media_mode": "animation_2d",
+      "description": "Gothic dark fantasy aesthetic with high-contrast chiaroscuro lighting, heavy ink shadows, moody atmospheric haze, glowing magical aura effects, and gritty dramatic tension.",
+      "character_ref_style": "Art style: dark fantasy anime model sheet. Heavy black ink shadows, sharp dramatic facial features, moody high-contrast lighting, glowing aura accents, textured dark wardrobe on charcoal-gray backdrop. STRICTLY NOT cheerful, NOT pastel, NOT live action.",
+      "storyboard_style": "Art style: gritty dark fantasy anime storyboard. Deep shadows, ominous silhouettes, glowing weapon effects, heavy atmospheric tension.",
+      "style_anchor": "Art style: gritty dark fantasy anime aesthetic. High-contrast chiaroscuro lighting, deep heavy ink shadows, sharp dramatic line art, atmospheric smoke, flying embers, and intense supernatural aura glow.",
+      "motion_anchor": "Motion style: heavy weighty character movements, dramatic deliberate pauses, explosive bursts of dark magical energy, swirling shadows and embers.",
+      "negative_anchor": "STRICTLY NOT pastel colors, NOT cheerful comedy, NOT live action, NOT plastic 3D, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve character identity with heavy dramatic shadows and gothic fantasy styling.",
+      "audio_anchor": "Sound design: deep menacing sub-bass rumbles, sharp metallic blade clashes, roaring magical flames, dark choir and ominous strings."
     },
     "motion_comic_2d": {
-      "label": "Source-faithful motion comic",
+      "label": "Source-Faithful Motion Comic",
       "media_mode": "motion_comic",
-      "style_anchor": "Art style: polished full-color Korean webtoon motion-comic adaptation, preserving the source line art, cel-shaded palette, facial identity, wardrobe, and graphic silhouettes while presenting each beat as a clean cinematic vertical composition.",
-      "motion_anchor": "Motion style: restrained source-faithful animation using multiplane parallax, subtle character breathing and eye movement, animated hair and cloth, environmental particles, controlled pans and zooms, and selective effects. Keep the original visual language recognizable without turning the output into a static slideshow.",
-      "negative_anchor": "NOT photorealistic, NOT live-action, NOT 3D CGI, NOT a pasted page, NOT visible comic gutters, NOT scanlation text, NOT a multi-panel collage, NOT subtitles, NOT speech bubbles, NOT watermark.",
-      "reference_anchor": "Use the clean narrative crop and character reference as identity anchors, but stage one full-bleed shot per beat and remove source-page gutters, captions, credits, and promotional material.",
-      "audio_anchor": "Sound design: restrained cinematic ambience, selective whooshes and impacts, subtle score, and spoken English dialogue with emotion cues."
+      "description": "High-fidelity preservation of original comic book / manhwa artwork with multiplane parallax depth, camera pans, zooms, and selective movement.",
+      "character_ref_style": "Art style: source-faithful comic illustration turnaround. Exact preservation of original publication art style, clean line weights, halftone/screentone details, authentic comic coloring.",
+      "storyboard_style": "Art style: graphic novel motion-comic storyboard with panel transitions, multiplane depth cues, and camera tracking paths.",
+      "style_anchor": "Visual style: source-faithful motion-comic artwork. Preserves the authentic ink line art, screen tones, and color palette of the original comic illustration with multiplane depth layers.",
+      "motion_anchor": "Motion style: multiplane 2.5D parallax, dramatic 2D camera pushes and pans, selective isolated character movement, speed-line transitions, and floating energy particles.",
+      "negative_anchor": "STRICTLY NOT full 3D, NOT live action, NOT full fluid Disney animation, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Maintain exact 1:1 fidelity with the source publication character designs.",
+      "audio_anchor": "Sound design: stylized graphic novel sound effects, atmospheric ambient hums, punchy comic impact sounds."
+    },
+    "cyberpunk_neon": {
+      "label": "Cyberpunk / Sci-Fi Anime",
+      "media_mode": "animation_2d",
+      "description": "Futuristic anime aesthetic with vibrant neon highlights, rain reflections, chromatic aberration, holographic overlays, and high-contrast dark urban lighting.",
+      "character_ref_style": "Art style: cyberpunk anime character model sheet. Crisp dark ink lines, high-contrast neon rim lighting, high-tech wardrobe details, reflective synthetic fabrics on dark studio backdrop.",
+      "storyboard_style": "Art style: cyberpunk anime storyboard. Neon-lit compositions, Dutch angles, holographic HUD elements, rainy reflective streets.",
+      "style_anchor": "Visual style: high-tech cyberpunk sci-fi anime. Vibrant neon rim lighting, deep night shadows, wet ground reflections, volumetric fog, subtle chromatic aberration, and glowing cybernetic accents.",
+      "motion_anchor": "Motion style: high-speed tech action, flickering holographic HUDs, lens flares, dynamic motorcycle/weapon tracking.",
+      "negative_anchor": "STRICTLY NOT medieval fantasy, NOT live action, NOT watercolor, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve character identity enhanced with neon rim lights and high-tech detailing.",
+      "audio_anchor": "Sound design: electronic synthesizer score, digital glitch noises, buzzing neon lights, high-tech machinery whirs."
+    },
+    "classic_comic_book": {
+      "label": "Western Graphic Novel / Comic Book",
+      "media_mode": "animation_2d",
+      "description": "Bold western comic book styling with expressive dynamic ink brushwork, cross-hatching, Ben-Day dot shading, and dramatic heroic lighting.",
+      "character_ref_style": "Art style: classic comic book graphic novel character model sheet. Bold ink brushstrokes, dynamic cross-hatching, dramatic chiaroscuro shadow blocks on neutral backdrop.",
+      "storyboard_style": "Art style: graphic novel storyboard. Dramatic heroic framing, deep ink shadows, bold graphic angles.",
+      "style_anchor": "Art style: premium graphic novel comic book illustration. Bold ink brushwork, rich cross-hatched shadows, vintage Ben-Day halftone texture, and dramatic high-contrast heroic lighting.",
+      "motion_anchor": "Motion style: stylized comic motion with strong pose-to-pose transitions, dynamic camera sweeps, and graphic action pops.",
+      "negative_anchor": "STRICTLY NOT generic 3D CGI, NOT photorealistic live action, NOT flat pastel, NOT subtitles, NOT speech bubbles, NOT watermark.",
+      "reference_anchor": "Preserve character features rendered in bold western comic book brushwork.",
+      "audio_anchor": "Sound design: punchy orchestral brass hits, dramatic cinematic percussion, visceral physical impact effects."
     }
   }
 }

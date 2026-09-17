@@ -8,6 +8,27 @@ import re
 from pathlib import Path
 
 AGY = "/home/john/.local/bin/agy"
+STYLE_CONFIG_PATH = Path(__file__).with_name("style_presets.json")
+
+
+def load_style_profile(chapter_dir: Path, requested: str | None = None) -> tuple[str, dict]:
+    """Load explicit preset, or chapter's style_selection.json, or default."""
+    if not STYLE_CONFIG_PATH.exists():
+        return "webtoon_2d", {}
+    config = json.loads(STYLE_CONFIG_PATH.read_text(encoding="utf-8"))
+    selection = chapter_dir / "style_selection.json"
+    selected = requested
+    if not selected and selection.exists():
+        try:
+            selected = json.loads(selection.read_text(encoding="utf-8")).get("default_preset")
+        except Exception:
+            pass
+    selected = selected or config.get("default_for_unconfigured_chapters", "webtoon_2d")
+    presets = config.get("presets", {})
+    if selected not in presets:
+        available = ", ".join(sorted(presets))
+        raise ValueError(f"Unknown style preset {selected!r}; choose one of: {available}")
+    return selected, presets[selected]
 
 
 def slugify(value: str) -> str:
@@ -91,18 +112,37 @@ def run(prompt, timeout=900):
     return result.stdout.strip()
 
 
-def make_character_prompt(name, details, out):
+def make_character_prompt(name, details, out, profile: dict | None = None):
+    profile = profile or {}
+    char_style = profile.get(
+        "character_ref_style",
+        "Art style: authentic 2D Korean webtoon manhwa anime animation. Crisp clean dark ink line art, vibrant flat cel-shaded coloring, authentic manhwa character features, professional model sheet."
+    )
+    negative = profile.get("negative_anchor", "STRICTLY NOT 3D render, NOT live action, NOT photorealistic.")
     return f"""Use Nano Banana Pro image generation. Generate a professional vertical 9:16 character reference sheet for {name}.
 
 CHARACTER DESIGN LOCK:
 {details}
 
-Layout: one clean 9:16 sheet on off-white studio background. Show exactly four consistent views: front full body, 3/4 portrait, side profile, seated or action pose. Repeat same face, hair, age, body proportions, and wardrobe in every view. Add a small readable header with the character name and a tiny wardrobe note. Crisp premium modern digital manhwa/webtoon art, realistic anatomy, clean linework, controlled cell shading, professional model sheet. No plot scene, no extra characters, no speech bubbles, no watermark, no story panels, no collage borders beyond the sheet layout.
+STYLE DIRECTIVES:
+{char_style}
+Negative constraints: {negative}
+
+Layout: one clean 9:16 sheet on neutral studio background. Show exactly four consistent turnaround views: front full body, 3/4 portrait, side profile, and action pose. Repeat same face, hair, age, body proportions, and wardrobe in every view. Add a small readable header banner with the character name and a tiny wardrobe note. Professional model sheet. No plot scene, no extra characters, no speech bubbles, no watermark, no story panels, no collage borders beyond the sheet layout.
 Save generated PNG exactly here: {out}
 """
 
 
-def make_storyboard_prompt(title, panel_files, labels, out, chapter_dir, ref_dir, manga_title):
+def make_storyboard_prompt(title, panel_files, labels, out, chapter_dir, ref_dir, manga_title, profile: dict | None = None):
+    profile = profile or {}
+    sb_style = profile.get(
+        "storyboard_style",
+        "Visual style: authentic 2D Korean webtoon manhwa director sheet. Crisp dark ink lines, vibrant cel shading."
+    )
+    sb_neg = profile.get(
+        "negative_anchor",
+        "STRICTLY NOT 3D render, NOT live-action CGI, NOT photorealistic, no watermark."
+    )
     ref_paths = "\n".join(str(p) for p in sorted(ref_dir.glob("*.png")))
     panels = "\n".join(f"{i+1}. {label} ({panel_files[min(i, len(panel_files)-1)]})" for i, label in enumerate(labels))
     timestamp_lines = "\n".join([
@@ -118,9 +158,12 @@ def make_storyboard_prompt(title, panel_files, labels, out, chapter_dir, ref_dir
 HEADER TEXT exactly:
 SERYE DRAMA BLOCK — {manga_title} — {title}
 
+STYLE AND FORMAT:
+- {sb_style}
+- Constraints: {sb_neg}
+
 CANVAS AND GRID — FOLLOW EXACTLY:
 - 9:16 vertical, approximately 768x1376 pixels.
-- Premium commercial modern manhwa/webtoon art, crisp linework, realistic anatomy, controlled cell shading.
 - Solid black title banner at top with small bold white header.
 - Solid black gutters between panels and rows.
 - EXACT GRID: Row 1 = two equal panels side by side. Row 2 = one full-width panel. Row 3 = two equal panels side by side. Row 4 = two equal panels side by side. Row 5 = one full-width final panel.
@@ -162,6 +205,7 @@ def main():
     ap.add_argument("--characters", action="store_true")
     ap.add_argument("--storyboards", action="store_true")
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--style-preset", default=None, help="Art style preset from style_presets.json")
     args = ap.parse_args()
     base, ref_dir, sb_dir = chapter_paths(args.chapter_dir.resolve(), args.reference_dir)
     if args.reference_dir:
@@ -170,6 +214,17 @@ def main():
     sb_dir.mkdir(parents=True, exist_ok=True)
     if not (args.characters or args.storyboards or args.all):
         ap.error("choose --characters, --storyboards, or --all")
+
+    selected_style, profile = load_style_profile(base, args.style_preset)
+    print(f"[STYLE] Active art style preset: {selected_style} ({profile.get('label', '')})", flush=True)
+
+    selection_path = base / "style_selection.json"
+    if args.style_preset or not selection_path.exists():
+        selection_path.write_text(json.dumps({
+            "default_preset": selected_style,
+            "label": profile.get("label", ""),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }, indent=2), encoding="utf-8")
 
     metadata = {}
     metadata_path = base / "metadata.json"
@@ -180,8 +235,8 @@ def main():
     if (args.characters or args.all) and not args.reference_dir:
         for slug, name, details in CHARACTERS:
             out = ref_dir / f"{slug}_ref.png"
-            print(f"[CHARACTER] {name} -> {out}", flush=True)
-            run(make_character_prompt(name, details, out))
+            print(f"[CHARACTER] {name} -> {out} [{selected_style}]", flush=True)
+            run(make_character_prompt(name, details, out, profile))
             print("[OK]", flush=True)
     elif args.reference_dir:
         print(f"[CHARACTER] Reusing existing refs from {ref_dir}", flush=True)
@@ -190,8 +245,8 @@ def main():
     if args.storyboards or args.all:
         for slug, title, pages, labels in build_block_specs(base):
             out = sb_dir / f"{slug}.png"
-            print(f"[STORYBOARD] {title} -> {out}", flush=True)
-            run(make_storyboard_prompt(title, pages, labels, out, base, ref_dir, manga_title))
+            print(f"[STORYBOARD] {title} -> {out} [{selected_style}]", flush=True)
+            run(make_storyboard_prompt(title, pages, labels, out, base, ref_dir, manga_title, profile))
             print("[OK]", flush=True)
 
 if __name__ == "__main__":

@@ -72,6 +72,23 @@ Reference example on disk: `/home/john/manga-reviews/output/the-investor-who-see
 
 ## End-to-End Execution Workflow
 
+### Stage 0: Mandatory Art & Animation Style Selection (Prompt User First)
+
+**CRITICAL AGENT RULE**:
+Before generating ANY visual assets (character reference model sheets, storyboards, or block prompts), you **MUST** ask the user to choose their preferred art/animation style using the `clarify` tool, UNLESS they already explicitly specified it in their prompt!
+
+Never proceed to Stage 3 (Character Reference Model Sheets) or Stage 4 (Storyboards) without confirming the user's preferred style!
+
+Present the choices:
+1. Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)
+2. Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)
+3. 2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)
+4. Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)
+5. Stylized 3D Animated Film (Pixar/DreamWorks style 3D characters, tactile materials)
+6. Dark Fantasy Anime (gritty chiaroscuro, heavy ink shadows, glowing magical auras)
+
+Save choice to `output/<slug>/ch<N>/style_selection.json` and pass `--style-preset <PRESET>` to `generate_nano_storyboards.py` and `build_block_prompts_txt.py`.
+
 ### Stage 1: Scrape Chapter Panels
 ```bash
 cd /home/john/manga-reviews
