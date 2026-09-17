@@ -1,125 +1,159 @@
 ---
 name: animation-pipeline-koyawel
 description: "Use when running the animation-pipeline-koyawel manga/manhwa/webtoon-to-video asset pipeline."
-version: 1.1.0
+version: 1.2.0
 author: John, Hermes Agent
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [animation, manga, manhwa, webtoon, storyboards, block-prompts, video]
+    tags: [manga, manhwa, scraping, character-refs, storyboards, block-prompts, video]
     category: media
-    related_skills: [manga-video-storyboard-pipeline, manga-review-pipeline, ai-drama-series-pipeline]
+    related_skills: [ai-drama-series-pipeline, ai-video-content-qa, serye-web]
 ---
 
 # Animation Pipeline Koyawel
 
-Production-grade automated asset pipeline converting manga, manhwa, manhua, and webtoons into short-form vertical video assets (TikTok, YouTube Shorts, Reels, Google Flow, Kling).
+Turns one scraped manga/manhwa/manhua chapter into production-ready short-form video assets:
+1. **Scraped chapter panels**: Clean, numbered narrative pages in `output/<slug>/ch<N>/images/` plus `metadata.json` and canonical `chapter_analysis.json`.
+2. **Character reference model sheets**: 9:16 PNG turnarounds (`768x1376`) in `character_refs/` on neutral studio backdrops (`#F4F4F4`) with front full-body, 3/4 portrait, side profile, and action pose **matching the chosen art/animation style preset** (e.g. photorealistic live-action real human actors when `photorealistic_live_action` is selected; 2D model sheets when `webtoon_2d` is selected). Never paste 2D comic panels into a live-action reference.
+3. **10-second SERYE drama storyboard blocks**: 6-beat blocks with timestamps and freeze-frame ending in `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`. Visual PNG storyboard sheet compositing (legacy `nano_storyboards/`) is omitted from default deliverables.
+4. **Block prompts in .txt format**: Plain-text Flow/Kling prompt files (`blockN_prompts.txt` with `@@@NEXT@@@` delimiter and `blockN_video_prompt.txt`) in `flow_queue/`.
 
-## Repository & Environment
+Visual storyboard PNG sheet generation (`nano_storyboards/` and `clean_frame_crops/`) is REMOVED from default pipeline deliverables. Video generation tools take prompt text and clean character references, not composite collage sheets. No final video rendering, no narration audio generation, no review prose, and no CSV files required.
 
-- Working checkout: `/home/john/animation-pipeline-koyawel/`
-- Python environment: Python 3.12 (`~/.venv_manga` or system Python 3)
-- Style configuration: `style_presets.json`
-- Verification script: `verify_manga_chapter_assets.py`
-- Test suite: `python3 -m unittest discover -s tests`
+## When to Use
 
----
+- Scrape manga/manhwa/manhua panels from a URL or title into clean chapter assets.
+- Generate or reuse series character model sheets (9:16 PNGs at `768x1376`) matching the selected style preset.
+- Build 10-second SERYE drama narrative storyboard blocks (6 beats with timestamps, ending on freeze frame) in `storyboard_9_16.json`.
+- Export shot-by-shot and continuous block prompts in plain `.txt` format with `@@@NEXT@@@`.
+- Verify a chapter's visual assets against the production contract.
 
-## 🎨 Supported Art & Animation Styles
+Don't use for: video rendering, audio/TTS synthesis, or CSV queue generation (plain `.txt` format is the deliverable).
 
-The pipeline supports 9 distinct visual presets in `style_presets.json`:
+## Prerequisites
 
-1. **`photorealistic_live_action`**: Cinematic Photorealistic Live-Action (real human actors, cinematic lenses, grounded sets, natural skin texture, practical/CGI fantasy VFX).
-2. **`studio_ghibli`**: Studio Ghibli Nostalgic Hand-Painted Anime (lush watercolor backgrounds, soft natural cel shading, gentle expressive character linework, warm sunlight).
-3. **`webtoon_2d`**: 2D Korean Webtoon / Manhwa Anime (crisp clean dark ink lines, vibrant flat cel shading, authentic manhwa character features, controlled fluid 2D animation).
-4. **`anime_sakuga_2d`**: Dynamic Japanese Anime Sakuga Action (high-energy hand-drawn key poses, dynamic perspective distortion, sharp shadow cuts, impact frames, speed lines).
-5. **`stylized_3d_animation`**: Stylized 3D Animated Film (Pixar / DreamWorks style, tactile materials, soft subsurface scattering on skin, dimensional studio lighting).
-6. **`dark_fantasy_anime`**: Dark Fantasy Anime (gritty gothic chiaroscuro, heavy ink shadows, moody atmospheric haze, glowing magical aura effects).
-7. **`cyberpunk_neon`**: Cyberpunk / Sci-Fi Anime (neon highlights, rain reflections, volumetric fog, chromatic aberration, sleek tech detailing).
-8. **`motion_comic_2d`**: Source-Faithful Motion Comic (preserves original comic book / manhwa print artwork with multiplane parallax depth, camera pans, and zooms).
-9. **`classic_comic_book`**: Western Graphic Novel / Comic Book (bold expressive ink brushstrokes, dynamic cross-hatching, vintage Ben-Day halftone dot styling).
+- Working directory: `/home/john/manga-reviews/` (or `/home/john/animation-pipeline-koyawel/`)
+- Python virtualenv: `~/.venv_manga/` (Python 3.12 with PIL/Pillow, requests, bs4)
+- Verification script: `/home/john/manga-reviews/verify_manga_chapter_assets.py`
+- Test suite: `python3 -m unittest discover -s /home/john/manga-reviews/tests`
 
----
+## Directory & Asset Structure
 
-## ⚠️ STAGE 0: MANDATORY STYLE PROMPT (BEFORE ALL PROCESSES)
+```text
+output/<series-slug>/ch<chapter>/
+  images/
+    page_001.webp (or .png, .jpg)
+    page_002.webp
+    ...
+  metadata.json
+  chapter_analysis.json
+  style_selection.json
+  character_refs/
+    <character_slug>_ref.png              # 768x1376 9:16 PNG model sheets matching style preset
+  character_refs_source.json              # Provenance manifest (reused for Ch2+)
+  storyboard_9_16.json                    # Canonical storyboard metadata (6 beats/block)
+  storyboard_9_16.md / .html              # Production documentation
+  flow_queue/
+    block1_prompts.txt                    # 6 shots separated by @@@NEXT@@@
+    block1_video_prompt.txt               # Continuous 10s master block prompt
+    ...
+    flow_6_continuous_blocks.txt          # All blocks combined with @@@NEXT@@@
+    flow_all_36_shots.txt                 # Flat shots combined
+    prompt_txt_manifest.json              # Manifest of all text prompts
+```
+
+## End-to-End Execution Workflow
+
+### Stage 0: Mandatory Art & Animation Style Selection (Prompt User First)
 
 **CRITICAL AGENT RULE**:
-Before generating ANY visual assets (character reference model sheets, storyboards, or block prompts), you **MUST** prompt the user to choose their preferred art and animation style using the `clarify` tool, UNLESS the user has already explicitly stated their preferred style in their message!
+Before generating ANY visual assets (character reference model sheets or block prompts), you **MUST** ask the user to choose their preferred art and animation style using the `clarify` tool, UNLESS they already explicitly specified it in their prompt!
 
-**NEVER silently default to the 2D manhwa style or skip asking the user.**
+**STRICT RULE**:
+- NEVER silently default to 2D manhwa or any other style.
+- NEVER assume or default based on previous sessions, memory profile notes, or other series.
+- Fabricating `selected_by_user: true` in `style_selection.json` without asking the user via `clarify` is strictly forbidden.
+- Always confirm the user's preferred style before generating character references or prompts.
 
-When calling `clarify`, present the top recommended choices:
-- "Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)"
-- "Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)"
-- "2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)"
-- "Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)"
-- "Stylized 3D Animated Film (Pixar/DreamWorks style 3D characters, tactile materials)"
-- "Dark Fantasy Anime (gritty chiaroscuro, heavy ink shadows, glowing magical auras)"
+Present the choices via `clarify`:
+1. "Cinematic Photorealistic Live-Action (real human actors, grounded sets, cinematic lighting)"
+2. "2D Korean Webtoon / Manhwa Anime (crisp ink line art, flat cel shading, manhwa anatomy)"
+3. "Studio Ghibli Nostalgic Hand-Painted Anime (watercolor backgrounds, soft natural cel shading)"
+4. "Dynamic Anime Sakuga Action (high-energy hand-drawn key poses, impact frames, speed lines)"
+*(Additional presets in `style_presets.json`: Stylized 3D Animated Film, Dark Fantasy Anime, Motion Comic, Cyberpunk Neon, Classic Comic Book).*
 
-Once the user selects a style:
-1. Immediately save the selection to `output/<slug>/ch<N>/style_selection.json`:
-   ```json
-   {
-     "default_preset": "<SELECTED_PRESET>",
-     "label": "<LABEL>",
-     "selected_by_user": true
-   }
-   ```
-2. Pass `--style-preset <SELECTED_PRESET>` to ALL downstream generation commands.
-
----
-
-## Canonical Pipeline Stages
+Save choice to `output/<slug>/ch<N>/style_selection.json` and pass `--style-preset <PRESET>` to `build_block_prompts_txt.py` and `manga_pipeline.py`.
 
 ### Stage 1: Scrape Chapter Panels
 ```bash
-python3 manga_source_scraper.py --url "<MANGA_URL>" --output-dir output/<slug>/ch<N>
-```
+cd /home/john/manga-reviews
+source ~/.venv_manga/bin/activate
 
-### Stage 2: Canonical Sequential Chapter Analysis
-```bash
-python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch<N>
-```
+# Discover and scrape via MangaDex API or webtoon mirrors:
+python3 manga_source_scraper.py --query "<Manga Title>" --chapters 1
 
-### Stage 3: Character Reference Sheets (In Selected Art Style)
-Generate 9:16 model sheets matching the selected art style (e.g. photorealistic actor turnaround, Ghibli watercolor character, 2D webtoon, etc.):
-```bash
-python3 generate_nano_storyboards.py \
-  --chapter-dir output/<slug>/ch<N> \
-  --characters \
-  --style-preset <SELECTED_PRESET>
+# Or download directly from chapter URL:
+python3 scrape_manga.py "<Chapter URL>" --output-dir output/<slug>/ch<N>
 ```
-*Note: For Chapter 2+, reuse established Chapter 1 references unless a style change was requested:*
-```bash
-python3 generate_nano_storyboards.py \
-  --chapter-dir output/<slug>/ch<N> \
-  --reference-dir output/<slug>/ch1/character_refs
-```
+Verify: Numbered pages in `output/<slug>/ch<N>/images/` must be 1-indexed and contiguous (`page_001`, `page_002`, ...). Strip any reader credit cards, advertisements, or scanlation recruitment inserts.
 
-### Stage 4: 9:16 Vertical Storyboards & Multi-Part Episodic Segmentation
-For short chapters (<= 25 pages), 1 standard 60-second episode is generated (6 blocks of 10s).
-For long chapters (> 25 pages, e.g. 50-70 pages), the generator automatically segments the chapter into **multi-part 60s episodes** (~20-22 pages per episode) to prevent cramming and narrative compression:
-- Each episode has 6 blocks of 10s = 60s total, ending on a cliffhanger freeze-frame.
-- Outputs are organized into `episodes/ep01/`, `ep02/`, `ep03/` with a master `episodes_manifest.json` and unified `storyboard_9_16.json`.
+### Stage 2: Canonical Sequential Image Analysis
+Always analyze pages sequentially in chronological order (never parallelize vision reading):
 ```bash
-# Generate episodic storyboard metadata:
-python3 build_serye_storyboard.py \
-  --analysis output/<slug>/ch<N>/chapter_analysis.json \
-  --output-dir output/<slug>/ch<N> \
-  --pages-per-episode 22
+python3 sequential_chapter_analysis.py --chapter-dir output/<slug>/ch<N> --effort medium
 ```
-*Note: Visual storyboard PNG sheets (legacy nano_storyboards/) are omitted. The narrative storyboard JSON feeds directly into prompt generation.*
+Output: `chapter_analysis.json` containing exact dialogue, parenthesized vocal emotion tags `(emotion, tone)`, scene action, camera movement, and visual FX.
 
-### Stage 5: Block Prompts (.txt format with @@@NEXT@@@)
-Export plain-text prompts for Google Flow, Kling, or Veo matching the selected style:
-```bash
-python3 build_block_prompts_txt.py \
-  --chapter-dir output/<slug>/ch<N> \
-  --style-preset <SELECTED_PRESET>
-```
+### Stage 3: Character Reference Model Sheets Matching Selected Style
+- For Chapter 1 (or Ch 0): Create 9:16 vertical PNG model sheets (`768x1376`) for recurring characters:
+  ```bash
+  python3 generate_nano_storyboards.py --chapter-dir output/<slug>/ch1 --characters --style-preset <SELECTED_PRESET>
+  ```
+  - **Style Preset Enforcement**: The generated sheet MUST match the selected art style!
+    - When `photorealistic_live_action` is selected: Model sheets MUST portray real human actors with visible skin pores, natural hair strands, physically tailored costumes, 85mm portrait lens on a neutral off-white studio backdrop (`#F4F4F4`), with 4 consistent turnaround views (front full-body, 3/4 portrait, side profile, dynamic action pose). NEVER paste 2D comic panels into a live-action reference sheet!
+    - When `webtoon_2d` or `anime_sakuga_2d` is selected: Use authentic 2D anime/webtoon turnaround art.
+- For Chapter 2+: **Reuse Chapter 1 character references** to preserve visual identity across the series:
+  ```bash
+  python3 generate_nano_storyboards.py --chapter-dir output/<slug>/ch<N> --reference-dir output/<slug>/ch1/character_refs
+  ```
+  Writes `character_refs_source.json` pointing to Chapter 1 without duplicate files.
 
-### Stage 6: Asset Verification
+### Stage 4: Storyboard Narrative Blocks (storyboard_9_16.json)
+Build 10-second SERYE drama storyboard blocks (6 timing beats per block, timestamps, dialogue, ending on freeze frame):
+- For short chapters (<= 25 pages), 1 standard 60-second episode is generated (6 blocks = 60s total).
+- For long chapters (> 25 pages, e.g. 50-70 pages), the generator automatically segments the chapter into **multi-part 60s episodes** (~20-22 pages per episode) to prevent cramming:
 ```bash
-python3 verify_manga_chapter_assets.py output/<slug>/ch<N>
+python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N> --pages-per-episode 22
 ```
+Output: `storyboard_9_16.json`, `storyboard_9_16.md`, and `storyboard_9_16.html`.
+*NOTE: Visual storyboard sheet compositing (`nano_storyboards/*.png` and `clean_frame_crops/`) is REMOVED from the default pipeline. The narrative storyboard JSON feeds directly into prompt generation.*
+
+### Stage 5: Block Prompts Only in .txt Format
+Export plain-text prompts for video generators (Google Flow, Kling, Runway):
+```bash
+python3 build_block_prompts_txt.py --chapter-dir output/<slug>/ch<N> --style-preset <SELECTED_PRESET>
+```
+Output: `flow_queue/block[1-6]_prompts.txt` (each containing 6 shot prompts separated by `\n\n@@@NEXT@@@\n\n`), `block[1-6]_video_prompt.txt`, and `flow_6_continuous_blocks.txt`.
+- Style lock: Follows the selected preset from Stage 0 (e.g. Photorealistic Live-Action, 2D Korean Webtoon, Studio Ghibli, etc.) via `style_presets.json`. Prompt directives use `style_anchor`, `motion_anchor`, and `negative_anchor`.
+- Dialogue: Spoken English lines with parenthesized emotion cues: `(energetic, broadcast tone) ...`
+- Freeze frame: Beat 6 explicitly ends with: `Use the final beat as a complete freeze frame; do not add a new action after the final pose.`
+
+### Stage 6: Verify Assets
+Run the automated contract verifier:
+```bash
+python3 verify_manga_chapter_assets.py --chapter-dir output/<slug>/ch<N>
+```
+Must pass with exit code 0:
+`[OK] output/<slug>/ch<N>: N pages, 6 blocks, 36 beats verified`
+
+## Pitfalls & Core Rules
+
+1. **TXT Format Only**: The user requires `.txt` files with `@@@NEXT@@@`. Do NOT generate or deliver CSV queues unless explicitly requested.
+2. **Sequential Vision Only**: Never parallelize page analysis across multiple workers. Single sequential reader preserves chronology, character names, and dramatic tension.
+3. **Reuse Character References**: Never regenerate character model sheets on later chapters; always link back to Chapter 1 references via `character_refs_source.json`.
+4. **No Visual Storyboard Sheets**: Do NOT generate `nano_storyboards/*.png` or `clean_frame_crops/`. The deliverable is `storyboard_9_16.json` which feeds prompt generation.
+5. **No Scanlation Watermarks**: Exclude all promotional inserts, scanlator credits, and aggregator logos from narrative pages.
+6. **Style Preset Fidelity**: Character references and block prompts must strictly adhere to the chosen art/animation style preset. When `photorealistic_live_action` is chosen, character references must depict real human actors with natural skin texture and physical costumes—NEVER paste 2D comic art or crops into live-action reference sheets.
+7. **Parenthesized Emotion Tags**: Dialogue emotion cues must be inside parentheses at the start of the quote `(emotion, tone) Dialogue...`.
