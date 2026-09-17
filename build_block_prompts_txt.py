@@ -140,34 +140,78 @@ def main() -> None:
     title = data.get("title") or chapter_dir.name
     all_shots: list[str] = []
     continuous: list[str] = []
-    manifest = {"chapter_dir": str(chapter_dir), "format": "plain-text-prompts", "style_preset": style_id, "blocks": []}
+    manifest = {
+        "chapter_dir": str(chapter_dir),
+        "format": "plain-text-prompts",
+        "style_preset": style_id,
+        "pacing_mode": data.get("pacing_mode", "single_episode"),
+        "total_episodes": data.get("total_episodes", 1),
+        "blocks": [],
+    }
+
+    # If multi-part episodic, also support per-episode structures
+    has_episodes = bool(data.get("episodes") and len(data.get("episodes")) > 1)
+    episode_prompts: dict[int, list[str]] = {}
+    episode_continuous: dict[int, list[str]] = {}
 
     for block_number, block in enumerate(blocks, 1):
+        ep_num = block.get("episode_number", 1)
+        ep_block_num = block.get("episode_block_number", block_number)
         shots = [
             format_shot_prompt(title, block, beat, block_number, beat_number, profile)
             for beat_number, beat in enumerate(block.get("beats") or [])
         ]
         continuous_prompt = format_continuous_prompt(title, block, block_number, profile)
+
+        # Write root block prompt files
         write_delimited(output_dir / f"block{block_number}_prompts.txt", shots)
         (output_dir / f"block{block_number}_video_prompt.txt").write_text(
             continuous_prompt + "\n", encoding="utf-8"
         )
+
+        # If multi-episode, also write epXX_blockN files
+        if has_episodes:
+            write_delimited(output_dir / f"ep{ep_num:02d}_block{ep_block_num}_prompts.txt", shots)
+            (output_dir / f"ep{ep_num:02d}_block{ep_block_num}_video_prompt.txt").write_text(
+                continuous_prompt + "\n", encoding="utf-8"
+            )
+            episode_prompts.setdefault(ep_num, []).extend(shots)
+            episode_continuous.setdefault(ep_num, []).append(continuous_prompt)
+
+            # Also mirror into chapter_dir/episodes/epXX/flow_queue
+            ep_dir = chapter_dir / "episodes" / f"ep{ep_num:02d}" / "flow_queue"
+            ep_dir.mkdir(parents=True, exist_ok=True)
+            write_delimited(ep_dir / f"block{ep_block_num}_prompts.txt", shots)
+            (ep_dir / f"block{ep_block_num}_video_prompt.txt").write_text(
+                continuous_prompt + "\n", encoding="utf-8"
+            )
+
         all_shots.extend(shots)
         continuous.append(continuous_prompt)
         manifest["blocks"].append({
             "block": block_number,
+            "episode": ep_num,
+            "episode_block": ep_block_num,
             "title": block.get("block_title"),
             "shot_count": len(shots),
             "prompts_file": str(output_dir / f"block{block_number}_prompts.txt"),
             "continuous_file": str(output_dir / f"block{block_number}_video_prompt.txt"),
         })
 
+    # Write episode-level continuous files if multi-part
+    if has_episodes:
+        for ep_num, ep_cont in episode_continuous.items():
+            write_delimited(output_dir / f"ep{ep_num:02d}_flow_6_continuous_blocks.txt", ep_cont)
+            ep_dir = chapter_dir / "episodes" / f"ep{ep_num:02d}" / "flow_queue"
+            write_delimited(ep_dir / "flow_6_continuous_blocks.txt", ep_cont)
+            write_delimited(ep_dir / f"flow_all_{len(episode_prompts[ep_num])}_shots.txt", episode_prompts[ep_num])
+
     write_delimited(output_dir / f"flow_{len(continuous)}_continuous_blocks.txt", continuous)
     write_delimited(output_dir / f"flow_all_{len(all_shots)}_shots.txt", all_shots)
     (output_dir / "prompt_txt_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"[OK] Wrote {len(blocks)} blocks and {len(all_shots)} shot prompts to {output_dir}")
+    print(f"[OK] Wrote {len(blocks)} blocks ({manifest['total_episodes']} episodes) and {len(all_shots)} shot prompts to {output_dir}")
 
 
 if __name__ == "__main__":

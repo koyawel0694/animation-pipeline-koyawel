@@ -58,7 +58,17 @@ def build_block_specs(chapter_dir: Path):
             labels.append(beat.get("label", f"BEAT {len(labels) + 1}"))
         if not page_files:
             raise ValueError(f"Storyboard block {index} has no source page files")
-        specs.append((f"block{index:02d}_{slugify(title)}", f"Block {index} — {title}", page_files, labels))
+
+        ep_num = block.get("episode_number")
+        ep_block = block.get("episode_block_number")
+        if ep_num is not None and ep_block is not None and data.get("total_episodes", 1) > 1:
+            slug_prefix = f"ep{ep_num:02d}_block{ep_block:02d}"
+            label_prefix = f"Part {ep_num} Block {ep_block}"
+        else:
+            slug_prefix = f"block{index:02d}"
+            label_prefix = f"Block {index}"
+
+        specs.append((f"{slug_prefix}_{slugify(title)}", f"{label_prefix} — {title}", page_files, labels))
     if not specs:
         raise ValueError(f"No storyboard blocks found in {storyboard_path}")
     return specs

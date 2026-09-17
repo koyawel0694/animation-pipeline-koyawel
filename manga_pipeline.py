@@ -194,6 +194,8 @@ def orchestrate_manga_pipeline(
     stage: str = "all",
     output_base: str | None = None,
     style_preset: str | None = None,
+    episodes: int | None = None,
+    pages_per_episode: int = 22,
 ) -> list[Path]:
     base_out = Path(output_base or (SCRIPT_DIR / "output")).resolve()
     base_out.mkdir(parents=True, exist_ok=True)
@@ -271,15 +273,27 @@ def orchestrate_manga_pipeline(
                 label="Subagent 1 & 2 Scene Engine",
             )
 
-        # Stage: 10-Second SERYE Drama Storyboard Blocks
+        # Stage: 10-Second SERYE Drama Storyboard Blocks (Episodic)
         if stage in ("all", "storyboard", "visuals"):
-            print_banner("STAGE 3B: 10-SECOND SERYE DRAMA STORYBOARD BLOCKS")
+            print_banner("STAGE 3B: 10-SECOND SERYE DRAMA STORYBOARD BLOCKS (EPISODIC)")
             serye_script = SCRIPT_DIR / "build_serye_storyboard.py"
             canon_json = ch_dir / "chapter_analysis.json"
             if canon_json.exists():
+                serye_cmd = [
+                    python_bin,
+                    str(serye_script),
+                    "--analysis",
+                    str(canon_json),
+                    "--output-dir",
+                    str(ch_dir),
+                ]
+                if episodes:
+                    serye_cmd.extend(["--episodes", str(episodes)])
+                elif pages_per_episode:
+                    serye_cmd.extend(["--pages-per-episode", str(pages_per_episode)])
                 run_command(
-                    [python_bin, str(serye_script), "--analysis", str(canon_json), "--output-dir", str(ch_dir)],
-                    label="SERYE 10s Storyboard Blocks Builder",
+                    serye_cmd,
+                    label="SERYE Multi-Part Storyboard Blocks Builder",
                 )
             else:
                 print(f"[WARN] Missing {canon_json}; skipping storyboard block definition.")
@@ -333,6 +347,8 @@ def main():
     parser.add_argument("--stage", default="all", choices=["all", "scrape", "analyze", "prompts", "storyboard", "visuals", "flow"], help="Run specific pipeline stage")
     parser.add_argument("--output-base", "-o", default=None, help="Output base directory (defaults to ./output)")
     parser.add_argument("--style-preset", "-s", default=None, help="Art style preset (e.g. photorealistic_live_action, studio_ghibli, webtoon_2d, etc.)")
+    parser.add_argument("--episodes", type=int, default=None, help="Override number of 60s episodes for long chapters")
+    parser.add_argument("--pages-per-episode", type=int, default=22, help="Target pages per 60s episode (default: 22)")
     args = parser.parse_args()
 
     target = args.url or args.title
@@ -344,6 +360,8 @@ def main():
         stage=args.stage,
         output_base=args.output_base,
         style_preset=args.style_preset,
+        episodes=args.episodes,
+        pages_per_episode=args.pages_per_episode,
     )
 
 

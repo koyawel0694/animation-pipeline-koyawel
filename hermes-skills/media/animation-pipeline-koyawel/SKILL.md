@@ -97,16 +97,22 @@ python3 generate_nano_storyboards.py \
   --reference-dir output/<slug>/ch1/character_refs
 ```
 
-### Stage 4: 9:16 Vertical Storyboards (In Selected Art Style)
+### Stage 4: 9:16 Vertical Storyboards & Multi-Part Episodic Segmentation
+For short chapters (<= 25 pages), 1 standard 60-second episode is generated (6 blocks of 10s).
+For long chapters (> 25 pages, e.g. 50-70 pages), the generator automatically segments the chapter into **multi-part 60s episodes** (~20-22 pages per episode) to prevent cramming and narrative compression:
+- Each episode has 6 blocks of 10s = 60s total, ending on a cliffhanger freeze-frame.
+- Outputs are organized into `episodes/ep01/`, `ep02/`, `ep03/` with a master `episodes_manifest.json` and unified `storyboard_9_16.json`.
 ```bash
-# Generate storyboard metadata:
-python3 build_serye_storyboard.py --analysis output/<slug>/ch<N>/chapter_analysis.json --output-dir output/<slug>/ch<N>
+# Generate episodic storyboard metadata:
+python3 build_serye_storyboard.py \
+  --analysis output/<slug>/ch<N>/chapter_analysis.json \
+  --output-dir output/<slug>/ch<N> \
+  --pages-per-episode 22
 
 # Render visual storyboard sheets matching selected style:
-python3 generate_nano_storyboards.py \
+python3 compose_chapter_storyboards.py \
   --chapter-dir output/<slug>/ch<N> \
-  --storyboards \
-  --style-preset <SELECTED_PRESET>
+  --reference-dir output/<slug>/ch1/character_refs
 ```
 
 ### Stage 5: Block Prompts (.txt format with @@@NEXT@@@)
